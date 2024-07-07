@@ -1,0 +1,68 @@
+import torch
+import torch.nn.functional as F
+
+
+def compute_metrics_md(logits, targets):
+    # Compute F1 score, recall, and precision
+    predicted_labels = torch.argmax(logits, dim=-1).view(-1)
+    true_labels = targets.view(-1)
+
+    true_positive = torch.sum((predicted_labels == 1) & (true_labels == 1)).item()
+    false_positive = torch.sum((predicted_labels == 1) & (true_labels == 0)).item()
+    false_negative = torch.sum((predicted_labels == 0) & (true_labels == 1)).item()
+
+    if true_positive == 0:
+        precision = 0
+        recall = 0
+        f1_score = 0
+    else:
+        precision = true_positive / (true_positive + false_positive)
+        recall = true_positive / (true_positive + false_negative)
+        f1_score = 2 * (precision * recall) / (precision + recall)
+
+    return precision, recall, f1_score
+
+
+def compute_metrics_multi_class(logits, targets):
+    predicted_labels = torch.argmax(logits, dim=-1).view(-1)
+    true_labels = torch.argmax(targets, dim=-1).view(-1)
+
+    true_positive = torch.sum(
+        (predicted_labels == true_labels) & (true_labels != 0)
+    ).item()
+    false_positive = torch.sum(
+        (predicted_labels != true_labels) & (predicted_labels != 0)
+    ).item()
+    false_negative = torch.sum((predicted_labels == 0) & (true_labels != 0)).item()
+
+    if true_positive == 0:
+        precision = 0
+        recall = 0
+        f1_score = 0
+    else:
+        precision = true_positive / (true_positive + false_positive)
+        recall = true_positive / (true_positive + false_negative)
+        f1_score = 2 * (precision * recall) / (precision + recall)
+
+    return precision, recall, f1_score
+
+
+def compute_metrics_rels(logits, targets):
+    predicted_labels = F.softmax(logits)
+    predicted_labels = torch.argmax(logits, dim=-1).view(-1)
+    true_labels = torch.argmax(targets, dim=-1).view(-1)
+
+    true_positive = torch.sum((predicted_labels == 1) & (true_labels == 1)).item()
+    false_positive = torch.sum((predicted_labels == 1) & (true_labels == 0)).item()
+    false_negative = torch.sum((predicted_labels == 0) & (true_labels == 1)).item()
+
+    if true_positive == 0:
+        precision = 0
+        recall = 0
+        f1_score = 0
+    else:
+        precision = true_positive / (true_positive + false_positive)
+        recall = true_positive / (true_positive + false_negative)
+        f1_score = 2 * (precision * recall) / (precision + recall)
+
+    return precision, recall, f1_score
