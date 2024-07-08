@@ -105,9 +105,17 @@ class DocJEREModel(nn.Module):
 
         # Joint
         if eval_mode:
+            # Preprocess joint
             predicted_entity_pos = self.get_predicted_entity_pos(
                 logits.view(span_idx.size(0), span_idx.size(1), -1), span_idx
             )
+            joint_entity_pos, joint_hts, joint_coreference_labels, proportions = (
+                self.preprocess_joint(
+                    entity_pos, predicted_entity_pos, hts, coreference_labels
+                )
+            )
+            # Joint Coreference Resolution
+
             (
                 joint_coref_precision,
                 joint_coref_recall,
@@ -115,11 +123,72 @@ class DocJEREModel(nn.Module):
             ) = self.coreference_resolution_joint(
                 embeddings,
                 attention_mask,
-                entity_pos,
-                hts,
-                coreference_labels,
-                predicted_entity_pos,
+                joint_entity_pos,
+                joint_hts,
+                joint_coreference_labels,
+                proportions,
             )
+
+            # TODO: Joint Entity Typing
+            (
+                proportions_joint_entity_clusters,
+                aligned_mentions_proportions,
+                joint_entity_types,
+                joint_entity_embeddings,
+            ) = (
+                [],
+                [],
+                [],
+                [],
+            )
+            is_joint_entity = False
+            for i in range(B):
+                if proportions[i] > 0 and len(joint_entity_pos[i]) > 1:
+                    i_joint_hts = [joint_hts[i]]
+                    i_joint_entity_pos = [joint_entity_pos[i]]
+                    i_joint_coreference_labels = [joint_coreference_labels[i]]
+                    i_joint_entity_clusters = self.get_coreference_clusters(
+                        i_joint_hts, i_joint_entity_pos, i_joint_coreference_labels
+                    )
+                    i_joint_entity_clusters = [
+                        cluster
+                        for cluster in i_joint_entity_clusters[0]
+                        if cluster in entity_clusters[i]
+                    ]
+                    if i_joint_entity_clusters:
+                        is_joint_entity = True
+                        aligned_mentions_proportions.append(proportions[i])
+                        i_joint_entity_types = self.get_joint_entity_types_in_batch(
+                            i_joint_entity_clusters, entity_clusters[i], entity_types[i]
+                        )
+                        proportions_joint_entity_clusters.append(
+                            len(i_joint_entity_clusters) / len(entity_clusters[i])
+                        )
+                        i_joint_entity_embeddings = self.get_batch_entity_embeddings(
+                            embeddings[i], attention_mask[i], i_joint_entity_clusters
+                        )
+                        joint_entity_embeddings.append(i_joint_entity_embeddings)
+                        joint_entity_types.append(torch.tensor(i_joint_entity_types))
+
+            if is_joint_entity:
+                print(
+                    "Proportion of joint entities:", proportions_joint_entity_clusters
+                )
+                (
+                    joint_entity_typing_precision,
+                    joint_entity_typing_recall,
+                    joint_entity_typing_f1,
+                ) = self.entity_typing_joint(
+                    joint_entity_embeddings,
+                    joint_entity_types,
+                    proportions_joint_entity_clusters,
+                    aligned_mentions_proportions,
+                )
+
+            else:
+                joint_entity_typing_precision = joint_entity_typing_recall = (
+                    joint_entity_typing_f1
+                ) = 0
 
         total_loss = md_loss + coref_loss + entity_typing_loss
         md_outputs = {
@@ -143,9 +212,14 @@ class DocJEREModel(nn.Module):
 
         if eval_mode:
             joint_coref_outputs = {
-                "precision": joint_coref_precision,
-                "recall": joint_coref_recall,
-                "f1": joint_coref_f1,
+                "precision": joint_coref_precision / B,
+                "recall": joint_coref_recall / B,
+                "f1": joint_coref_f1 / B,
+            }
+            joint_entity_typing_outputs = {
+                "precision": joint_entity_typing_precision / B,
+                "recall": joint_entity_typing_recall / B,
+                "f1": joint_entity_typing_f1 / B,
             }
             return (
                 total_loss,
@@ -153,6 +227,7 @@ class DocJEREModel(nn.Module):
                 coref_outputs,
                 joint_coref_outputs,
                 entity_typing_outputs,
+                joint_entity_typing_outputs,
             )
         else:
             return (
@@ -162,50 +237,23 @@ class DocJEREModel(nn.Module):
                 entity_typing_outputs,
             )
 
-    def coreference_resolution_joint(
-        self,
-        x,
-        attention_mask,
-        entity_pos,
-        hts,
-        coreference_labels,
-        predicted_entity_pos,
-    ):
-        B, L, D = x.size()
-        joint_entity_pos, joint_hts, joint_coreference_labels, proportions = (
-            self.preprocess_joint_corefs(
-                entity_pos, predicted_entity_pos, hts, coreference_labels
-            )
-        )
-        joint_coref_precision = joint_coref_recall = joint_coref_f1 = 0
-        for i in range(B):
-            if proportions[i] > 0.1 and len(joint_entity_pos[i]) > 1:
-                i_entity_pos = [joint_entity_pos[i]]
-                i_hts = [joint_hts[i]]
-                i_coreference_labels = [joint_coreference_labels[i]]
-                _, coref_precision, coref_recall, coref_f1 = (
-                    self.coreference_resolution(
-                        x,
-                        attention_mask,
-                        i_entity_pos,
-                        i_hts,
-                        i_coreference_labels,
-                    )
-                )
-                joint_coref_precision += coref_precision * proportions[i]
-                joint_coref_recall += coref_recall * proportions[i]
-                joint_coref_f1 += coref_f1 * proportions[i]
-            else:
-                joint_coref_precision += 0
-                joint_coref_recall += 0
-                joint_coref_f1 += 0
-        return (
-            joint_coref_precision / B,
-            joint_coref_recall / B,
-            joint_coref_f1 / B,
-        )
+    def get_predicted_entity_pos(self, logits, span_idx):
+        logits = torch.softmax(logits, dim=-1)
+        predicted_entity_pos = []
+        for b in range(logits.size(0)):
+            predicted_labels = torch.argmax(logits[b], dim=-1)
+            b_predicted_entity_pos = []
+            for predicted_label, span in zip(
+                predicted_labels.tolist(), span_idx[b].tolist()
+            ):
+                if predicted_label == 1:
+                    b_predicted_entity_pos.append(span)
+            b_predicted_entity_pos.sort(key=lambda x: [x[0], x[1]])
+            predicted_entity_pos.append(b_predicted_entity_pos)
 
-    def preprocess_joint_corefs(
+        return predicted_entity_pos
+
+    def preprocess_joint(
         self, gt_entity_pos, predicted_entity_pos, hts, coreference_labels
     ):
         B = len(gt_entity_pos)
@@ -221,9 +269,6 @@ class DocJEREModel(nn.Module):
                         if (entity[0], entity[1]) in gt_entity_pos[b]
                     ]
                 )
-            )
-            joint_ent_proportions.append(
-                len(b_joint_entity_pos) / len(gt_entity_pos[b])
             )
             b_joint_entity_pos.sort()
             for i in range(len(b_joint_entity_pos) - 1):
@@ -255,43 +300,65 @@ class DocJEREModel(nn.Module):
             joint_ent_proportions,
         )
 
-    def get_predicted_entity_pos(self, logits, span_idx):
-        logits = torch.softmax(logits, dim=-1)
-        predicted_entity_pos = []
-        for b in range(logits.size(0)):
-            predicted_labels = torch.argmax(logits[b], dim=-1)
-            b_predicted_entity_pos = []
-            for predicted_label, span in zip(
-                predicted_labels.tolist(), span_idx[b].tolist()
-            ):
-                if predicted_label == 1:
-                    b_predicted_entity_pos.append(span)
-            b_predicted_entity_pos.sort(key=lambda x: [x[0], x[1]])
-            predicted_entity_pos.append(b_predicted_entity_pos)
+    def coreference_resolution_joint(
+        self,
+        x,
+        attention_mask,
+        joint_entity_pos,
+        joint_hts,
+        joint_coreference_labels,
+        proportions,
+    ):
+        B, L, D = x.size()
+        joint_coref_precision = joint_coref_recall = joint_coref_f1 = 0
+        for i in range(B):
+            if proportions[i] > 0.1 and len(joint_entity_pos[i]) > 1:
+                i_entity_pos = [joint_entity_pos[i]]
+                i_hts = [joint_hts[i]]
+                i_coreference_labels = [joint_coreference_labels[i]]
+                _, coref_precision, coref_recall, coref_f1 = (
+                    self.coreference_resolution(
+                        x,
+                        attention_mask,
+                        i_entity_pos,
+                        i_hts,
+                        i_coreference_labels,
+                    )
+                )
+                joint_coref_precision += coref_precision * proportions[i]
+                joint_coref_recall += coref_recall * proportions[i]
+                joint_coref_f1 += coref_f1 * proportions[i]
+        return (joint_coref_precision, joint_coref_recall, joint_coref_f1)
 
-        return predicted_entity_pos
+    def get_batch_entity_embeddings(
+        self, b_embeddings, b_attention, b_entity_clusters, offset=1
+    ):
+        b_entity_embs, b_entity_atts = [], []
+        for entity_num, e in enumerate(b_entity_clusters):
+            entity_embs, entity_atts = [], []
+            for m in e:
+                start, end = m
+                e_emb = b_embeddings[start : end + 1]
+                e_att = b_attention[:, start + offset : end + offset + 1]
+                entity_embs.append(torch.logsumexp(e_emb, dim=0))
+                entity_atts.append(e_att)
+            entity_embs = torch.stack(entity_embs, dim=0)
+            entity_embs = torch.logsumexp(entity_embs, dim=0)
+            # entity_attention = torch.stack(entity_attention, dim=0)
+            b_entity_embs.append(entity_embs)
+        return torch.stack(b_entity_embs, dim=0)
 
     def get_entity_embeddings(self, embeddings, attention, entity_clusters):
         offset = 1  # if self.config.transformer_type in ["bert", "roberta"] else 0
-        bs, h, _, c = attention.size()
         B, L, D = embeddings.size()
         entity_embeddings = []
         entity_attention = []
         for i in range(B):
-            b_entity_embs, b_entity_atts = [], []
-            for entity_num, e in enumerate(entity_clusters[i]):
-                entity_embs, entity_atts = [], []
-                for m in e:
-                    start, end = m
-                    e_emb = embeddings[i, start : end + 1]
-                    e_att = attention[i, :, start + offset : end + offset + 1]
-                    entity_embs.append(torch.logsumexp(e_emb, dim=0))
-                    entity_atts.append(e_att)
-                entity_embs = torch.stack(entity_embs, dim=0)
-                entity_embs = torch.logsumexp(entity_embs, dim=0)
-                # entity_attention = torch.stack(entity_attention, dim=0)
-                b_entity_embs.append(entity_embs)
-            b_entity_embs = torch.stack(b_entity_embs, dim=0)
+            b_embeddings = embeddings[i]
+            b_attention = attention[i]
+            b_entity_embs = self.get_batch_entity_embeddings(
+                b_embeddings, b_attention, entity_clusters[i], offset=offset
+            )
             entity_embeddings.append(b_entity_embs)
         entity_embeddings = torch.cat(entity_embeddings, dim=0)
         return entity_embeddings
@@ -338,6 +405,41 @@ class DocJEREModel(nn.Module):
                     coreferences.append([remaining_entity])
             coreferences_clusters.append(coreferences)
         return coreferences_clusters
+
+    def get_joint_entity_types_in_batch(
+        self, i_joint_entity_clusters, i_entity_clusters, i_entity_types
+    ):
+        i_joint_entity_types = []
+        for cluster in i_joint_entity_clusters:
+            if cluster in i_entity_clusters:
+                cluster_index = i_entity_clusters.index(cluster)
+                i_joint_entity_types.append(i_entity_types[cluster_index].tolist())
+        return i_joint_entity_types
+
+    def entity_typing_joint(
+        self,
+        joint_entity_embeddings,
+        joint_entity_types,
+        proportions,
+        aligned_mentions_proportions,
+    ):
+        B = len(proportions)
+        joint_precision = joint_recall = joint_f1 = 0
+        for i in range(B):
+            if proportions[i] > 0.1 and len(joint_entity_embeddings[i]) > 1:
+                i_entity_entity_emb = joint_entity_embeddings[i]
+                i_labels = [joint_entity_types[i]]
+                _, precision, recall, f1 = self.entity_typing(
+                    i_entity_entity_emb, i_labels
+                )
+                joint_precision += (
+                    precision * proportions[i] * aligned_mentions_proportions[i]
+                )
+                joint_recall += (
+                    recall * proportions[i] * aligned_mentions_proportions[i]
+                )
+                joint_f1 += f1 * proportions[i] * aligned_mentions_proportions[i]
+        return (joint_precision, joint_recall, joint_f1)
 
     def filter_spans(self, span_representations, span_scores):
         filtered_spans = []

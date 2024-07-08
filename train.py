@@ -81,6 +81,7 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
         coref_loss, coref_precision, coref_recall, coref_f1 = 1e-30, 0, 0, 0
         et_loss, et_precision, et_recall, et_f1 = 1e-30, 0, 0, 0
         joint_coref_precision, joint_coref_recall, joint_coref_f1 = 0, 0, 0
+        joint_et_precision, joint_et_recall, joint_et_f1 = 0, 0, 0
 
         val_loss = 0
         with torch.no_grad():
@@ -102,6 +103,7 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                     coref_outputs,
                     joint_coref_outputs,
                     entity_typing_outputs,
+                    joint_entity_typing_outputs,
                 ) = model(**inputs, eval_mode=True)
                 val_loss += loss.item()
                 md_precision, md_recall, md_f1, md_loss = update_batch_metrics(
@@ -119,6 +121,7 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                 et_precision, et_recall, et_f1, et_loss = update_batch_metrics(
                     et_precision, et_recall, et_f1, entity_typing_outputs, loss=et_loss
                 )
+                print("joint_coref_outputs:", joint_coref_outputs)
                 joint_coref_precision, joint_coref_recall, joint_coref_f1 = (
                     update_batch_metrics(
                         joint_coref_precision,
@@ -126,6 +129,12 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                         joint_coref_f1,
                         joint_coref_outputs,
                     )
+                )
+                joint_et_precision, joint_et_recall, joint_et_f1 = update_batch_metrics(
+                    joint_et_precision,
+                    joint_et_recall,
+                    joint_et_f1,
+                    joint_entity_typing_outputs,
                 )
             val_loss /= len(val_loader)
 
@@ -142,6 +151,10 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
             ]
             val_joint_coref_metrics = [
                 item / len(val_loader) for item in val_joint_coref_metrics
+            ]
+            val_joint_et_metrics = [joint_et_precision, joint_et_recall, joint_et_f1]
+            val_joint_et_metrics = [
+                item / len(val_loader) for item in val_joint_et_metrics
             ]
             if val_loss < best_val_loss:
                 print(
@@ -162,7 +175,8 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                         Train ET Loss: {train_et_metrics[0]:.4f}, Train ET Precision: {train_et_metrics[1]:.4f}, Train ET Recall: {train_et_metrics[2]:.4f}, Train ET F1: {train_et_metrics[3]:.4f}\n\
                         Val ET Loss: {val_et_metrics[0]:.4f}, Val ET Precision: {val_et_metrics[1]:.4f}, Val ET Recall: {val_et_metrics[2]:.4f}, Val ET F1: {val_et_metrics[3]:.4f}\n\
                         ======================\n\
-                        Val Joint Coref Precision: {val_joint_coref_metrics[0]:.4f}, Val Joint Coref Recall: {val_joint_coref_metrics[1]:.4f}, Val Joint Coref F1: {val_joint_coref_metrics[2]:.4f}"
+                        Val Joint Coref Precision: {val_joint_coref_metrics[0]:.4f}, Val Joint Coref Recall: {val_joint_coref_metrics[1]:.4f}, Val Joint Coref F1: {val_joint_coref_metrics[2]:.4f}\n\
+                        Val Joint ET Precision: {val_joint_et_metrics[0]:.4f}, Val Joint ET Recall: {val_joint_et_metrics[1]:.4f}, Val Joint ET F1: {val_joint_et_metrics[2]:.4f}\n"
         progress_bar.set_description(description)
 
 
@@ -203,9 +217,9 @@ if __name__ == "__main__":
 
     if "sample" in config["train_path"]:
         train_dataset = train_dataset[:1]
-        for i in range(10):
+        for i in range(150):
             train_dataset += train_dataset[:1]
-        val_dataset = train_dataset
+        val_dataset = train_dataset[:1]
 
     # Create data loaders
     train_loader = DataLoader(
