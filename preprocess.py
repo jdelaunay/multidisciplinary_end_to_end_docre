@@ -3,7 +3,9 @@ import numpy as np
 import torch
 
 
-def read_dataset(data, tokenizer, classes_to_id, max_seq_length=1024, max_width=4):
+def read_dataset(
+    data, tokenizer, classes_to_id, rel_to_id, max_seq_length=1024, max_width=4
+):
     features = []
     print("Loading dataset...")
     for sample in data:
@@ -78,19 +80,43 @@ def read_dataset(data, tokenizer, classes_to_id, max_seq_length=1024, max_width=
             coreference_labels.append(value)
         assert len(hts) == len(coreference_labels)
 
-        # Preprocess entity types
+        # Preprocess entity types and relations
         entity_types = []
-        # for entity in vertex_set:
 
         entity_pos_grouped = [[] for _ in range(len(vertex_set))]
         for pos in entity_pos:
             entity_pos_grouped[pos[2]].append(pos)
-        for entity in entity_pos_grouped:
+
+        ## Preprocess entity types
+        ent_map = {}
+        effective_ent_count = 0
+        for i, entity in enumerate(entity_pos_grouped):
+            ent_map[i] = effective_ent_count
             if entity:
                 types = [mention[3] for mention in entity]
                 ent_type = max(set(types), key=types.count)
                 entity_types.append(get_ent_class(ent_type, classes_to_id))
+                effective_ent_count += 1
 
+        ## Preprocess relations
+
+        ### Sample positive relations
+        entity_centric_hts = []
+        relation_labels = []
+        for label in rels:
+            if entity_pos_grouped[label["h"]] and entity_pos_grouped[label["t"]]:
+                entity_centric_hts.append((ent_map[label["h"]], ent_map[label["t"]]))
+                relation_labels.append(get_ent_class(label["r"], rel_to_id))
+
+        ### Sample negative relations
+        for i in range(len(entity_pos_grouped)):
+            for j in range(len(entity_pos_grouped)):
+                if i != j:
+                    if (i, j) not in entity_centric_hts:
+                        entity_centric_hts.append((ent_map[i], ent_map[j]))
+                        relation_labels.append([1] + [0] * (len(rel_to_id) - 1))
+
+        # Clean entity_pos
         entity_pos = [(x[0], x[1]) for x in entity_pos]
 
         # Tokenize input
@@ -122,7 +148,8 @@ def read_dataset(data, tokenizer, classes_to_id, max_seq_length=1024, max_width=
             "coreference_labels": coreference_labels,
             "entity_pos": entity_pos,
             "entity_types": entity_types,
-            # "relations": rels,
+            "entity_centric_hts": entity_centric_hts,
+            "relation_labels": relation_labels,
         }
         features.append(feature)
     print("Dataset loaded.")

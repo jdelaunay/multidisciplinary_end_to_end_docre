@@ -17,9 +17,12 @@ class EntityClassifier(nn.Module):
         )
 
     def forward(self, entity_embeddings, entity_types):
+        print("EMBEDDINGS SIZE:", entity_embeddings.size())
         entity_logits = self.classifier(entity_embeddings)
         entity_types = torch.cat(entity_types, dim=0).to(entity_logits.device)
 
+        print("LOGITS & TYPES SIZES:", entity_logits.size(), entity_types.size())
+        print("LOGITS:", entity_logits)
         loss = F.cross_entropy(
             entity_logits.float(),
             entity_types.float(),

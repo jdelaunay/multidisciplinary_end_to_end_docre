@@ -24,6 +24,7 @@ def compute_metrics_md(logits, targets):
 
 
 def compute_metrics_multi_class(logits, targets):
+    predicted_labels = F.softmax(logits)
     predicted_labels = torch.argmax(logits, dim=-1).view(-1)
     true_labels = torch.argmax(targets, dim=-1).view(-1)
 
@@ -48,13 +49,16 @@ def compute_metrics_multi_class(logits, targets):
 
 
 def compute_metrics_rels(logits, targets):
-    predicted_labels = F.softmax(logits)
     predicted_labels = torch.argmax(logits, dim=-1).view(-1)
     true_labels = torch.argmax(targets, dim=-1).view(-1)
 
-    true_positive = torch.sum((predicted_labels == 1) & (true_labels == 1)).item()
-    false_positive = torch.sum((predicted_labels == 1) & (true_labels == 0)).item()
-    false_negative = torch.sum((predicted_labels == 0) & (true_labels == 1)).item()
+    true_positive = torch.sum(
+        (predicted_labels == true_labels) & (true_labels != 0)
+    ).item()
+    false_positive = torch.sum(
+        (predicted_labels != true_labels) & (predicted_labels != 0)
+    ).item()
+    false_negative = torch.sum((predicted_labels == 0) & (true_labels != 0)).item()
 
     if true_positive == 0:
         precision = 0

@@ -15,7 +15,8 @@ class CoreferenceResolver(nn.Module):
         self.block_size = block_size
         self.max_height = max_height
         self.cosine_attn = CosineMatrixAttention()
-        input_channels = out_channels = 1
+        input_channels = 1
+        out_channels = 256
         self.coref_unet = AttentionUNet(
             in_channels=input_channels, out_channels=out_channels
         )  # , down_channel=256)

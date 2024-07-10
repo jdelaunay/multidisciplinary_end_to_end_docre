@@ -5,6 +5,7 @@ from tqdm import tqdm
 import os
 import sys
 import datetime
+from torchinfo import summary
 
 from utils.utils import load_json, collate_fn
 from torch.utils.data import DataLoader
@@ -39,6 +40,7 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
         md_loss, md_precision, md_recall, md_f1 = 1e-30, 0, 0, 0
         coref_loss, coref_precision, coref_recall, coref_f1 = 1e-30, 0, 0, 0
         et_loss, et_precision, et_recall, et_f1 = 1e-30, 0, 0, 0
+        re_loss, re_precision, re_recall, re_f1 = 1e-30, 0, 0, 0
         for batch in train_loader:
             inputs = {
                 "input_ids": batch["input_ids"].to(device),
@@ -50,9 +52,13 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                 "hts": batch["hts"],
                 "entity_pos": batch["entity_pos"],
                 "entity_types": batch["entity_types"],
+                "entity_centric_hts": batch["entity_centric_hts"],
+                "relation_labels": batch["relation_labels"],
             }
             optimizer.zero_grad()
-            (loss, md_outputs, coref_outputs, entity_typing_outputs) = model(**inputs)
+            (loss, md_outputs, coref_outputs, entity_typing_outputs, re_outputs) = (
+                model(**inputs)
+            )
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
@@ -65,6 +71,9 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
             et_precision, et_recall, et_f1, et_loss = update_batch_metrics(
                 et_precision, et_recall, et_f1, entity_typing_outputs, loss=et_loss
             )
+            re_precision, re_recall, re_f1, re_loss = update_batch_metrics(
+                re_precision, re_recall, re_f1, re_outputs, loss=re_loss
+            )
 
         train_loss /= len(train_loader)
 
@@ -74,12 +83,15 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
         train_coref_metrics = [item / len(train_loader) for item in train_coref_metrics]
         train_et_metrics = [et_loss, et_precision, et_recall, et_f1]
         train_et_metrics = [item / len(train_loader) for item in train_et_metrics]
+        train_re_metrics = [re_loss, re_precision, re_recall, re_f1]
+        train_re_metrics = [item / len(train_loader) for item in train_re_metrics]
 
         # Validation loop
         model.eval()
         md_loss, md_precision, md_recall, md_f1 = 1e-30, 0, 0, 0
         coref_loss, coref_precision, coref_recall, coref_f1 = 1e-30, 0, 0, 0
         et_loss, et_precision, et_recall, et_f1 = 1e-30, 0, 0, 0
+        re_loss, re_precision, re_recall, re_f1 = 1e-30, 0, 0, 0
         joint_coref_precision, joint_coref_recall, joint_coref_f1 = 0, 0, 0
         joint_et_precision, joint_et_recall, joint_et_f1 = 0, 0, 0
 
@@ -96,6 +108,8 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                     "hts": batch["hts"],
                     "entity_pos": batch["entity_pos"],
                     "entity_types": batch["entity_types"],
+                    "entity_centric_hts": batch["entity_centric_hts"],
+                    "relation_labels": batch["relation_labels"],
                 }
                 (
                     loss,
@@ -104,6 +118,7 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                     joint_coref_outputs,
                     entity_typing_outputs,
                     joint_entity_typing_outputs,
+                    re_outputs,
                 ) = model(**inputs, eval_mode=True)
                 val_loss += loss.item()
                 md_precision, md_recall, md_f1, md_loss = update_batch_metrics(
@@ -121,7 +136,9 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                 et_precision, et_recall, et_f1, et_loss = update_batch_metrics(
                     et_precision, et_recall, et_f1, entity_typing_outputs, loss=et_loss
                 )
-                print("joint_coref_outputs:", joint_coref_outputs)
+                re_precision, re_recall, re_f1, re_loss = update_batch_metrics(
+                    re_precision, re_recall, re_f1, re_outputs, loss=re_loss
+                )
                 joint_coref_precision, joint_coref_recall, joint_coref_f1 = (
                     update_batch_metrics(
                         joint_coref_precision,
@@ -144,6 +161,10 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
             val_coref_metrics = [item / len(val_loader) for item in val_coref_metrics]
             val_et_metrics = [et_loss, et_precision, et_recall, et_f1]
             val_et_metrics = [item / len(val_loader) for item in val_et_metrics]
+            val_re_metrics = [re_loss, re_precision, re_recall, re_f1]
+            val_re_metrics = [item / len(val_loader) for item in val_re_metrics]
+
+            # Joint tasks metrics
             val_joint_coref_metrics = [
                 joint_coref_precision,
                 joint_coref_recall,
@@ -156,6 +177,8 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
             val_joint_et_metrics = [
                 item / len(val_loader) for item in val_joint_et_metrics
             ]
+
+            # Save best model
             if val_loss < best_val_loss:
                 print(
                     f"Epoch {epoch + 1}: Validation loss decreased from {best_val_loss:.4f} to {val_loss:.4f}"
@@ -174,6 +197,9 @@ def train(model, optimizer, train_loader, val_loader, device, epochs, save_path)
                         ---------------------\n\
                         Train ET Loss: {train_et_metrics[0]:.4f}, Train ET Precision: {train_et_metrics[1]:.4f}, Train ET Recall: {train_et_metrics[2]:.4f}, Train ET F1: {train_et_metrics[3]:.4f}\n\
                         Val ET Loss: {val_et_metrics[0]:.4f}, Val ET Precision: {val_et_metrics[1]:.4f}, Val ET Recall: {val_et_metrics[2]:.4f}, Val ET F1: {val_et_metrics[3]:.4f}\n\
+                        ---------------------\n\
+                        Train RE Loss: {train_re_metrics[0]:.4f}, Train RE Precision: {train_re_metrics[1]:.4f}, Train RE Recall: {train_re_metrics[2]:.4f}, Train RE F1: {train_re_metrics[3]:.4f}\n\
+                        Val RE Loss: {val_re_metrics[0]:.4f}, Val RE Precision: {val_re_metrics[1]:.4f}, Val RE Recall: {val_re_metrics[2]:.4f}, Val RE F1: {val_re_metrics[3]:.4f}\n\
                         ======================\n\
                         Val Joint Coref Precision: {val_joint_coref_metrics[0]:.4f}, Val Joint Coref Recall: {val_joint_coref_metrics[1]:.4f}, Val Joint Coref F1: {val_joint_coref_metrics[2]:.4f}\n\
                         Val Joint ET Precision: {val_joint_et_metrics[0]:.4f}, Val Joint ET Recall: {val_joint_et_metrics[1]:.4f}, Val Joint ET F1: {val_joint_et_metrics[2]:.4f}\n"
@@ -199,20 +225,27 @@ if __name__ == "__main__":
     ent2id = load_json(config["ent2id_path"])
     ent_num_classes = len(ent2id.keys())
 
+    # Load rel2id
+    rel2id = load_json(config["rel2id_path"])
+    rel_num_classes = len(rel2id.keys())
+
     # Load encoder and tokenizer
     model_config = AutoConfig.from_pretrained(config["model_name"])
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
     model = AutoModel.from_pretrained(config["model_name"], config=model_config)
-    model = DocJEREModel(model, tokenizer, ent_num_classes)
+    model = DocJEREModel(model, tokenizer, ent_num_classes, rel_num_classes)
     model.cuda()
+    # summary(model)
 
     # Load datasets
     if "arpi" in config["train_path"]:
         print("Using ARPI dataset")
     else:
         print("Using DocRED dataset")
-    train_dataset = read_dataset(load_json(config["train_path"]), tokenizer, ent2id)
-    val_dataset = read_dataset(load_json(config["val_path"]), tokenizer, ent2id)
+    train_dataset = read_dataset(
+        load_json(config["train_path"]), tokenizer, ent2id, rel2id
+    )
+    val_dataset = read_dataset(load_json(config["val_path"]), tokenizer, ent2id, rel2id)
     # test_dataset = read_dataset(load_json(config["test_path"]), tokenizer, ent2id)
 
     if "sample" in config["train_path"]:
