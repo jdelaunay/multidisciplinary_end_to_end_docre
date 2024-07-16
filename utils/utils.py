@@ -37,6 +37,7 @@ def collate_fn(batch):
     hts = [f["hts"] for f in batch]
     coreference_labels = [f["coreference_labels"] for f in batch]
     coreference_labels = [torch.tensor(label) for label in coreference_labels]
+    entity_clusters = [f["entity_clusters"] for f in batch]
 
     entity_types = [f["entity_types"] for f in batch]
     entity_types = [torch.tensor(label) for label in entity_types]
@@ -54,6 +55,7 @@ def collate_fn(batch):
         "span_mask": span_mask,
         "span_labels": span_labels,
         "coreference_labels": coreference_labels,
+        "entity_clusters": entity_clusters,
         "hts": hts,
         "entity_pos": [f["entity_pos"] for f in batch],
         "entity_types": entity_types,

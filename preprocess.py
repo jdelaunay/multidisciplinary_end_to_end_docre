@@ -98,6 +98,10 @@ def read_dataset(
                 entity_types.append(get_ent_class(ent_type, classes_to_id))
                 effective_ent_count += 1
 
+        for i in range(effective_ent_count):
+            assert i in ent_map.values()
+        # print("ENT MAP", ent_map)
+
         ## Preprocess relations
 
         ### Sample positive relations
@@ -109,15 +113,27 @@ def read_dataset(
                 relation_labels.append(get_ent_class(label["r"], rel_to_id))
 
         ### Sample negative relations
-        for i in range(len(entity_pos_grouped)):
-            for j in range(len(entity_pos_grouped)):
+        for i in range(effective_ent_count):
+            for j in range(effective_ent_count):
                 if i != j:
                     if (i, j) not in entity_centric_hts:
-                        entity_centric_hts.append((ent_map[i], ent_map[j]))
+                        entity_centric_hts.append((i, j))
                         relation_labels.append([1] + [0] * (len(rel_to_id) - 1))
+
+        for i in range(effective_ent_count):
+            for j in range(effective_ent_count):
+                if i != j:
+                    assert (i, j) in entity_centric_hts
 
         # Clean entity_pos
         entity_pos = [(x[0], x[1]) for x in entity_pos]
+
+        # Clean entity clusters
+        entity_clusters = [
+            [(x[0], x[1]) for x in entity] for entity in entity_pos_grouped if entity
+        ]
+        assert len(entity_clusters) == effective_ent_count
+        assert len(entity_types) == effective_ent_count
 
         # Tokenize input
         # sents = sents[:max_seq_length - 2]
@@ -146,6 +162,7 @@ def read_dataset(
             "span_labels": span_labels,
             "hts": hts,
             "coreference_labels": coreference_labels,
+            "entity_clusters": entity_clusters,
             "entity_pos": entity_pos,
             "entity_types": entity_types,
             "entity_centric_hts": entity_centric_hts,

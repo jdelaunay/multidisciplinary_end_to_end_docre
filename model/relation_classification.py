@@ -5,10 +5,37 @@ from opt_einsum import contract
 from model.at_loss import ATLoss
 
 from model.layers.attn_unet import AttentionUNet
-from model.metrics import compute_metrics_rels
+from model.metrics import compute_metrics_multi_class
 
 
 class UNet_Relation_Extractor(nn.Module):
+    """
+    Implements a UNet-based relation extraction model.
+
+    Args:
+        hidden_size (int): The size of the hidden layer.
+        block_size (int): The size of the block.
+        num_labels (int): The number of labels.
+        max_height (int): The maximum height.
+
+    Attributes:
+        hidden_size (int): The size of the hidden layer.
+        max_height (int): The maximum height.
+        block_size (int): The size of the block.
+        at_loss (ATLoss): The ATLoss object.
+        liner (nn.Linear): The linear layer.
+        relation_unet (AttentionUNet): The AttentionUNet object.
+        head_extractor (nn.Linear): The linear layer for head extraction.
+        tail_extractor (nn.Linear): The linear layer for tail extraction.
+        relation_classifier (nn.Linear): The linear layer for relation classification.
+
+    Methods:
+        get_ht(self, rel_enco, hts): Returns the ht values.
+        get_htss(self, entity_embeddings, entity_attentions, entity_centric_hts): Returns the hss and tss values.
+        get_channel_map(self, sequence_output, entity_as): Returns the channel map.
+        forward(self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels): Performs forward pass of the model.
+    """
+
     def __init__(self, hidden_size=768, block_size=64, num_labels=-1, max_height=4):
         super(UNet_Relation_Extractor, self).__init__()
         self.hidden_size = hidden_size
@@ -27,6 +54,16 @@ class UNet_Relation_Extractor(nn.Module):
         self.relation_classifier = nn.Linear(hidden_size * block_size, num_labels)
 
     def get_ht(self, rel_enco, hts):
+        """
+        Returns the ht values.
+
+        Args:
+            rel_enco (Tensor): The relation encoding tensor.
+            hts (List[List[Tuple[int, int]]]): The list of ht indices.
+
+        Returns:
+            Tensor: The ht values.
+        """
         htss = []
         for i in range(len(hts)):
             ht_index = hts[i]
@@ -36,6 +73,17 @@ class UNet_Relation_Extractor(nn.Module):
         return htss
 
     def get_htss(self, entity_embeddings, entity_attentions, entity_centric_hts):
+        """
+        Returns the hss and tss values.
+
+        Args:
+            entity_embeddings (Tensor): The entity embeddings tensor.
+            entity_attentions (List[Tensor]): The list of entity attentions tensors.
+            entity_centric_hts (List[List[Tuple[int, int]]]): The list of entity-centric ht indices.
+
+        Returns:
+            Tuple[Tensor, Tensor]: The hss and tss values.
+        """
         hss, tss = [], []
         for i in range(len(entity_centric_hts)):
             ht_i = torch.LongTensor(entity_centric_hts[i]).to(entity_embeddings.device)
@@ -48,10 +96,17 @@ class UNet_Relation_Extractor(nn.Module):
         return hss, tss
 
     def get_channel_map(self, sequence_output, entity_as):
-        # sequence_output = sequence_output.to('cpu')
-        # attention = attention.to('cpu')
+        """
+        Returns the channel map.
+
+        Args:
+            sequence_output (Tensor): The sequence output tensor.
+            entity_as (List[Tensor]): The list of entity attention tensors.
+
+        Returns:
+            Tensor: The channel map.
+        """
         bs, _, d = sequence_output.size()
-        # ne = max([len(x) for x in entity_as])  # 本次bs中的最大实体数
         ne = self.max_height
 
         index_pair = []
@@ -79,6 +134,19 @@ class UNet_Relation_Extractor(nn.Module):
     def forward(
         self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels
     ):
+        """
+        Performs forward pass of the module.
+
+        Args:
+            x (Tensor): The input tensor.
+            entity_embeddings (Tensor): The entity embeddings tensor.
+            entity_attentions (List[Tensor]): The list of entity attentions tensors.
+            entity_centric_hts (List[List[Tuple[int, int]]]): The list of entity-centric ht indices.
+            labels (List[int]): The list of labels.
+
+        Returns:
+            Tuple[Tensor, Tensor, Tensor, Tensor]: The loss, precision, recall, and f1 score.
+        """
         hs, ts = self.get_htss(entity_embeddings, entity_attentions, entity_centric_hts)
 
         feature_map = self.get_channel_map(x, entity_attentions)
@@ -98,5 +166,5 @@ class UNet_Relation_Extractor(nn.Module):
         labels = [torch.tensor(label) for label in labels]
         labels = torch.cat(labels, dim=0).to(logits)
         loss = self.at_loss(logits.float(), labels.float())
-        precision, recall, f1 = compute_metrics_rels(logits, labels)
+        precision, recall, f1 = compute_metrics_multi_class(logits, labels)
         return loss, precision, recall, f1

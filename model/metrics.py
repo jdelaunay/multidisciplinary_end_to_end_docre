@@ -3,7 +3,17 @@ import torch.nn.functional as F
 
 
 def compute_metrics_md(logits, targets):
-    # Compute F1 score, recall, and precision
+    """
+    Compute precision, recall, and F1 score for mention detection.
+
+    Args:
+        logits (torch.Tensor): The predicted logits from the model.
+        targets (torch.Tensor): The target labels.
+
+    Returns:
+        tuple: A tuple containing the precision, recall, and F1 score.
+
+    """
     predicted_labels = torch.argmax(logits, dim=-1).view(-1)
     true_labels = targets.view(-1)
 
@@ -24,6 +34,17 @@ def compute_metrics_md(logits, targets):
 
 
 def compute_metrics_multi_class(logits, targets):
+    """
+    Compute precision, recall, and F1 score for multi-class classification.
+
+    Args:
+        logits (torch.Tensor): The predicted logits from the model.
+        targets (torch.Tensor): The true labels.
+
+    Returns:
+        tuple: A tuple containing the precision, recall, and F1 score.
+
+    """
     predicted_labels = F.softmax(logits)
     predicted_labels = torch.argmax(logits, dim=-1).view(-1)
     true_labels = torch.argmax(targets, dim=-1).view(-1)
@@ -49,6 +70,17 @@ def compute_metrics_multi_class(logits, targets):
 
 
 def compute_metrics_rels(logits, targets):
+    """
+    Compute precision, recall, and F1 score for a given set of logits and targets.
+
+    Args:
+        logits (torch.Tensor): The predicted logits.
+        targets (torch.Tensor): The true labels.
+
+    Returns:
+        tuple: A tuple containing the precision, recall, and F1 score.
+
+    """
     predicted_labels = torch.argmax(logits, dim=-1).view(-1)
     true_labels = torch.argmax(targets, dim=-1).view(-1)
 

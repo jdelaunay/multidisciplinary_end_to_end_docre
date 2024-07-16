@@ -9,3 +9,5 @@ seaborn
 prettytable
 ai2-tango==1.3.2
 allennlp-light
+opt-einsum
+torchinfo
