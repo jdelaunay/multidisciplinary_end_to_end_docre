@@ -4,7 +4,7 @@ import torch
 
 
 def read_dataset(
-    data, tokenizer, classes_to_id, rel_to_id, max_seq_length=1024, max_width=4
+    data, tokenizer, classes_to_id, rel_to_id, max_span_width=5
 ):
     features = []
     print("Loading dataset...")
@@ -30,6 +30,7 @@ def read_dataset(
 
         # Preprocess entities
         entity_pos = []
+        
         for mention in mentions:
             sent_id = mention["sent_id"]
             pos = mention["pos"]
@@ -38,7 +39,7 @@ def read_dataset(
             else:
                 offset = sum([len(sample["sents"][i]) for i in range(sent_id)])
             start = sent_map[pos[0] + offset]
-            end = sent_map[pos[1] + offset] - 1
+            end = sent_map[pos[1] + offset]
             entity_pos.append(
                 (
                     start,
@@ -51,17 +52,16 @@ def read_dataset(
             )
 
         entity_pos = list(set(entity_pos))
-        entity_pos.sort(key=lambda x: (x[0], x[1]))
+        entity_pos.sort()
         # Check for duplicates in entity_pos
-        posi = [x[:2] for x in entity_pos]
-        duplicates = [pos for pos in posi if posi.count(pos) > 1]
-        if duplicates:
-            print("Duplicates found in entity_pos:", duplicates)
-            duplicate_indices = [
-                i for i, x in enumerate(entity_pos) if x[:2] in duplicates
-            ]
-            ent_dupli = [entity_pos[i] for i in duplicate_indices]
-            entity_pos = [x for x in entity_pos if x not in ent_dupli[1:]]
+        cleaned_entity_pos = []
+        for ent in entity_pos:
+            cleaned_entity_pos_only_pos = [x[:2] for x in cleaned_entity_pos]
+            if ent[:2] not in cleaned_entity_pos_only_pos:
+                cleaned_entity_pos.append(ent)
+        entity_pos = sorted(cleaned_entity_pos)
+
+
 
         # Preprocess coreferences
         corefs = {}
@@ -79,7 +79,6 @@ def read_dataset(
             hts.append(key)
             coreference_labels.append(value)
         assert len(hts) == len(coreference_labels)
-
         # Preprocess entity types and relations
         entity_types = []
 
@@ -100,7 +99,6 @@ def read_dataset(
 
         for i in range(effective_ent_count):
             assert i in ent_map.values()
-        # print("ENT MAP", ent_map)
 
         ## Preprocess relations
 
@@ -111,6 +109,7 @@ def read_dataset(
             if entity_pos_grouped[label["h"]] and entity_pos_grouped[label["t"]]:
                 entity_centric_hts.append((ent_map[label["h"]], ent_map[label["t"]]))
                 relation_labels.append(get_ent_class(label["r"], rel_to_id))
+        
 
         ### Sample negative relations
         for i in range(effective_ent_count):
@@ -120,55 +119,72 @@ def read_dataset(
                         entity_centric_hts.append((i, j))
                         relation_labels.append([1] + [0] * (len(rel_to_id) - 1))
 
-        for i in range(effective_ent_count):
-            for j in range(effective_ent_count):
-                if i != j:
-                    assert (i, j) in entity_centric_hts
+        sorted_entity_centric_hts = sorted(entity_centric_hts)
+        sorted_relation_labels = [relation_labels[entity_centric_hts.index(ht)] for ht in sorted_entity_centric_hts]
+        entity_centric_hts = sorted_entity_centric_hts
+        relation_labels = sorted_relation_labels
+        if entity_centric_hts:
+            for i in range(effective_ent_count):
+                for j in range(effective_ent_count):
+                    if i != j:
+                        assert (i, j) in entity_centric_hts
 
-        # Clean entity_pos
-        entity_pos = [(x[0], x[1]) for x in entity_pos]
+            # Clean entity_pos
+            entity_pos = [(x[0], x[1]) for x in entity_pos]
 
-        # Clean entity clusters
-        entity_clusters = [
-            [(x[0], x[1]) for x in entity] for entity in entity_pos_grouped if entity
-        ]
-        assert len(entity_clusters) == effective_ent_count
-        assert len(entity_types) == effective_ent_count
+            # Clean entity clusters
+            entity_clusters = [
+                [(x[0], x[1]) for x in entity]
+                for entity in entity_pos_grouped
+                if entity
+            ]
+            assert len(entity_clusters) == effective_ent_count
+            assert len(entity_types) == effective_ent_count
+            for cluster in entity_clusters:
+                for i in range(len(cluster) - 1):
+                    for j in range(i + 1, len(cluster)):
+                        assert coreference_labels[
+                            hts.index(
+                                (
+                                    entity_pos.index(cluster[i]),
+                                    entity_pos.index(cluster[j]),
+                                )
+                            )
+                        ] == [0, 1]
 
-        # Tokenize input
-        # sents = sents[:max_seq_length - 2]
-        input_ids = tokenizer.convert_tokens_to_ids(sents)
-        input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
+            # Tokenize input
+            # sents = sents[:max_seq_length - 2]
+            input_ids = tokenizer.convert_tokens_to_ids(sents)
+            input_ids = tokenizer.build_inputs_with_special_tokens(input_ids)
 
-        # List all possible spans
-        span_idx = []
-        for i in range(len(input_ids)):
-            # width = min(max_width, len(input_ids) - i)
-            span_idx.extend([(i, i + j) for j in range(max_width)])
+            # List all possible spans
+            span_idx = []
+            for i in range(len(input_ids)):
+                span_idx.extend([(i, i + j) for j in range(max_span_width)])
 
-        span_labels = []
-        for span in span_idx:
-            if span in entity_pos:
-                span_labels.append(1)
-            else:
-                span_labels.append(0)
-        span_idx = torch.tensor(span_idx, dtype=torch.long)
-        span_labels = torch.tensor(span_labels, dtype=torch.long)
+            span_labels = []
+            for span in span_idx:
+                if span in entity_pos:
+                    span_labels.append(1)
+                else:
+                    span_labels.append(0)
+            span_idx = torch.tensor(span_idx, dtype=torch.long)
+            span_labels = torch.tensor(span_labels, dtype=torch.long)
 
-        feature = {
-            "input_ids": input_ids,
-            "tokens": tokens,
-            "span_idx": span_idx,
-            "span_labels": span_labels,
-            "hts": hts,
-            "coreference_labels": coreference_labels,
-            "entity_clusters": entity_clusters,
-            "entity_pos": entity_pos,
-            "entity_types": entity_types,
-            "entity_centric_hts": entity_centric_hts,
-            "relation_labels": relation_labels,
-        }
-        features.append(feature)
+            feature = {
+                "input_ids": input_ids,
+                "tokens": tokens,
+                "span_idx": span_idx,
+                "span_labels": span_labels,
+                "hts": hts,
+                "coreference_labels": coreference_labels,
+                "entity_clusters": entity_clusters,
+                "entity_pos": entity_pos,
+                "entity_types": entity_types,
+                "entity_centric_hts": entity_centric_hts,
+                "relation_labels": relation_labels,
+            }
+            features.append(feature)
     print("Dataset loaded.")
     print("Number of samples:", len(features))
     return features

@@ -36,7 +36,7 @@ class UNet_Relation_Extractor(nn.Module):
         forward(self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels): Performs forward pass of the model.
     """
 
-    def __init__(self, hidden_size=768, block_size=64, num_labels=-1, max_height=4):
+    def __init__(self, hidden_size=768, block_size=64, num_labels=-1, max_height=5, depthwise=True):
         super(UNet_Relation_Extractor, self).__init__()
         self.hidden_size = hidden_size
         self.max_height = max_height
@@ -46,10 +46,12 @@ class UNet_Relation_Extractor(nn.Module):
         out_channels = 256
         self.liner = nn.Linear(hidden_size, input_channels)
         self.relation_unet = AttentionUNet(
-            in_channels=input_channels, out_channels=out_channels
+            in_channels=input_channels, out_channels=out_channels, depthwise=depthwise
         )
         self.head_extractor = nn.Linear(1 * hidden_size + out_channels, hidden_size)
         self.tail_extractor = nn.Linear(1 * hidden_size + out_channels, hidden_size)
+
+        self.dropout = nn.Dropout(0.2)
 
         self.relation_classifier = nn.Linear(hidden_size * block_size, num_labels)
 
@@ -72,7 +74,7 @@ class UNet_Relation_Extractor(nn.Module):
         htss = torch.stack(htss, dim=0)
         return htss
 
-    def get_htss(self, entity_embeddings, entity_attentions, entity_centric_hts):
+    def get_htss(self, sequence_outputs, entity_embeddings, entity_centric_hts):
         """
         Returns the hss and tss values.
 
@@ -86,9 +88,9 @@ class UNet_Relation_Extractor(nn.Module):
         """
         hss, tss = [], []
         for i in range(len(entity_centric_hts)):
-            ht_i = torch.LongTensor(entity_centric_hts[i]).to(entity_embeddings.device)
-            hs = torch.index_select(entity_embeddings, 0, ht_i[:, 0])
-            ts = torch.index_select(entity_embeddings, 0, ht_i[:, 1])
+            ht_i = torch.LongTensor(entity_centric_hts[i]).to(sequence_outputs.device)
+            hs = torch.index_select(entity_embeddings[i], 0, ht_i[:, 0])
+            ts = torch.index_select(entity_embeddings[i], 0, ht_i[:, 1])
             hss.append(hs)
             tss.append(ts)
         hss = torch.cat(hss, dim=0)
@@ -147,7 +149,7 @@ class UNet_Relation_Extractor(nn.Module):
         Returns:
             Tuple[Tensor, Tensor, Tensor, Tensor]: The loss, precision, recall, and f1 score.
         """
-        hs, ts = self.get_htss(entity_embeddings, entity_attentions, entity_centric_hts)
+        hs, ts = self.get_htss(x, entity_embeddings, entity_centric_hts)
 
         feature_map = self.get_channel_map(x, entity_attentions)
         attn_input = self.liner(feature_map).permute(0, 3, 1, 2).contiguous()
@@ -161,10 +163,12 @@ class UNet_Relation_Extractor(nn.Module):
         bl = (b1.unsqueeze(3) * b2.unsqueeze(2)).view(
             -1, self.hidden_size * self.block_size
         )
+        bl = self.dropout(bl)
 
         logits = self.relation_classifier(bl)
         labels = [torch.tensor(label) for label in labels]
         labels = torch.cat(labels, dim=0).to(logits)
         loss = self.at_loss(logits.float(), labels.float())
         precision, recall, f1 = compute_metrics_multi_class(logits, labels)
-        return loss, precision, recall, f1
+        predicted_labels = torch.argmax(logits, dim=1)
+        return predicted_labels, loss, precision, recall, f1

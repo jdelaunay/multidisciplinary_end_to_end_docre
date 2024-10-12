@@ -29,8 +29,8 @@ class EntityClassifier(nn.Module):
         self.num_labels = num_labels
         self.classifier = nn.Sequential(
             nn.LayerNorm(hidden_size),
-            nn.Linear(hidden_size, 512),
-            nn.Linear(512, num_labels),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_size, num_labels),
         )
 
     def forward(self, entity_embeddings, entity_types):
@@ -45,6 +45,8 @@ class EntityClassifier(nn.Module):
             tuple: A tuple containing the loss, precision, recall, and F1 score.
 
         """
+        entity_embeddings = torch.cat(entity_embeddings, dim=0)
+
         entity_logits = self.classifier(entity_embeddings)
         entity_types = torch.cat(entity_types, dim=0).to(entity_logits.device)
 
@@ -53,5 +55,6 @@ class EntityClassifier(nn.Module):
             entity_types.float(),
             reduction="mean",
         )
+        predicted_entity_types = torch.argmax(entity_logits, dim=1)
         precision, recall, f1 = compute_metrics_multi_class(entity_logits, entity_types)
-        return loss, precision, recall, f1
+        return predicted_entity_types, loss, precision, recall, f1

@@ -29,7 +29,7 @@ def collate_fn(batch):
         [b["span_idx"] for b in batch], batch_first=True, padding_value=0
     )
     span_labels = pad_sequence(
-        [b["span_labels"] for b in batch], batch_first=True, padding_value=-1
+        [b["span_labels"] for b in batch], batch_first=True, padding_value=0
     )
     span_mask = span_labels != -1
     span_mask = torch.tensor(span_mask, dtype=torch.long)

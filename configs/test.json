@@ -1,0 +1,22 @@
+{
+    "run_name": "test",
+    "model_name": "FacebookAI/roberta-base",
+    "train_path": "data/docred/sample.json",
+    "val_path": "data/docred/sample.json",
+    "test_path": "data/e2e_docred/test.json",
+    "ent2id_path": "data/docred/ent2id.json",
+    "rel2id_path": "data/docred/rel2id.json",
+    "max_span_width": 5,
+    "coref_strategy": "similarity",
+    "depthwise": false,
+    "batch_size": 2,
+    "learning_rate": 2e-5,
+    "epochs": 1,
+    "log_dir": "saves/",
+    "device": "cuda",
+    "coeff_md": 0,
+    "coeff_cr": 1,
+    "coeff_et": 0,
+    "coeff_re": 0
+
+}

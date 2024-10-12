@@ -20,7 +20,7 @@ class SpanClassifier(nn.Module):
         # Computing span scores
         span_logits = []
         for i in range(x.size(1)):
-            max_width = min(5, x.size(1) - i)
+            max_width = x.size(1) - i
             for j in range(i, i + max_width):
                 span_vector = torch.cat([start_logits[:, i, :], end_logits[:, j, :]], dim=-1)
                 span_logit = self.linear_span(span_vector)

@@ -74,7 +74,7 @@ class SpanAttention(nn.Module):
         self.span_extractor = SelfAttentiveSpanExtractor(hidden_size,
                                                          num_width_embeddings=max_width,
                                                          span_width_embedding_dim=width_embedding,
-                                                         )
+                                                        )
         self.downproject = nn.Sequential(
             nn.Linear(hidden_size + width_embedding, hidden_size),
             nn.ReLU()
