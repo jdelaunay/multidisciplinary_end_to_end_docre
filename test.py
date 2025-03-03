@@ -39,10 +39,20 @@ def update_batch_metrics(
     return metrics
 
 
-def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=1, coeff_coref=1, coeff_et=1, coeff_re=1):
+def test(
+    model,
+    test_loader,
+    device,
+    save_path,
+    dataset_name="docred",
+    coeff_md=1,
+    coeff_coref=1,
+    coeff_et=1,
+    coeff_re=1,
+):
 
     # Test loop
-    model.load_state_dict(torch.load(save_path))
+    model.load_state_dict(torch.load(save_path, weights_only=True))
     print(f"Model loaded from: {save_path}")
     print("COREF THRESHOLD", model.coreference_resolution.threshold)
     model.eval()
@@ -86,8 +96,20 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
             }
             md_gt.extend([label.item() for x in batch["span_labels"] for label in x])
             coref_gt.extend(batch["entity_clusters"])
-            et_gt.extend([torch.argmax(label).item() for x in batch["entity_types"] for label in x])
-            re_gt.extend([np.array(label).argmax() for x in batch["relation_labels"] for label in x])
+            et_gt.extend(
+                [
+                    torch.argmax(label).item()
+                    for x in batch["entity_types"]
+                    for label in x
+                ]
+            )
+            re_gt.extend(
+                [
+                    np.array(label).argmax()
+                    for x in batch["relation_labels"]
+                    for label in x
+                ]
+            )
             (
                 loss,
                 md_outputs,
@@ -103,14 +125,12 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
             md_precision, md_recall, md_f1, md_loss = update_batch_metrics(
                 md_precision, md_recall, md_f1, md_outputs, loss=md_loss
             )
-            coref_precision, coref_recall, coref_f1, coref_loss = (
-                update_batch_metrics(
-                    coref_precision,
-                    coref_recall,
-                    coref_f1,
-                    coref_outputs,
-                    loss=coref_loss,
-                )
+            coref_precision, coref_recall, coref_f1, coref_loss = update_batch_metrics(
+                coref_precision,
+                coref_recall,
+                coref_f1,
+                coref_outputs,
+                loss=coref_loss,
             )
             b3_precision, b3_recall, b3_f1 = update_batch_metrics(
                 b3_precision, b3_recall, b3_f1, coref_outputs, b3=True
@@ -164,7 +184,9 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
             else:
                 md_predictions.extend(list(md_outputs["predictions"].cpu().numpy()))
             coref_predictions.extend(coref_outputs["predictions"])
-            et_predictions.extend([label.item() for label in entity_typing_outputs["predictions"]])
+            et_predictions.extend(
+                [label.item() for label in entity_typing_outputs["predictions"]]
+            )
             re_predictions.extend([label.item() for label in re_outputs["predictions"]])
     test_loss /= len(test_loader)
 
@@ -191,9 +213,7 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
         item / len(test_loader) for item in test_joint_coref_metrics
     ]
     test_joint_b3_metrics = [joint_b3_precision, joint_b3_recall, joint_b3_f1]
-    test_joint_b3_metrics = [
-        item / len(test_loader) for item in test_joint_b3_metrics
-    ]
+    test_joint_b3_metrics = [item / len(test_loader) for item in test_joint_b3_metrics]
     test_joint_pair_metrics = [
         joint_pair_precision,
         joint_pair_recall,
@@ -203,13 +223,9 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
         item / len(test_loader) for item in test_joint_pair_metrics
     ]
     test_joint_et_metrics = [joint_et_precision, joint_et_recall, joint_et_f1]
-    test_joint_et_metrics = [
-        item / len(test_loader) for item in test_joint_et_metrics
-    ]
+    test_joint_et_metrics = [item / len(test_loader) for item in test_joint_et_metrics]
     test_joint_re_metrics = [joint_re_precision, joint_re_recall, joint_re_f1]
-    test_joint_re_metrics = [
-        item / len(test_loader) for item in test_joint_re_metrics
-    ]
+    test_joint_re_metrics = [item / len(test_loader) for item in test_joint_re_metrics]
 
     inference_time_per_example = inference_time / n_examples
     description = f"Test Loss: {test_loss:.4f}\n\
@@ -230,19 +246,13 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
     print(description)
     mention_detection_results = {
         "predictions": [int(pred) for pred in md_predictions],
-        "gt": [int(gt) for gt in md_gt]
+        "gt": [int(gt) for gt in md_gt],
     }
-    coreference_resolution_results = {
-        "predictions": coref_predictions,
-        "gt": coref_gt
-    }
-    entity_typing_results = {
-        "predictions": et_predictions,
-        "gt": et_gt
-    }
+    coreference_resolution_results = {"predictions": coref_predictions, "gt": coref_gt}
+    entity_typing_results = {"predictions": et_predictions, "gt": et_gt}
     relation_extraction_results = {
         "predictions": [int(pred) for pred in re_predictions],
-        "gt": [int(gt) for gt in re_gt]
+        "gt": [int(gt) for gt in re_gt],
     }
     dir = "error_analysis"
     os.makedirs(os.path.join(dir, dataset_name), exist_ok=True)
@@ -254,7 +264,7 @@ def test(model, test_loader, device, save_path, dataset_name="docred", coeff_md=
         json.dump(entity_typing_results, f)
     with open(os.path.join(dir, dataset_name, "relation_extraction.json"), "w") as f:
         json.dump(relation_extraction_results, f)
-    
+
 
 if __name__ == "__main__":
     seed = 12
@@ -284,17 +294,18 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
     model = AutoModel.from_pretrained(config["model_name"], config=model_config)
     print("Model loading...")
-    model = DocJEREModel(model,
-                         tokenizer,
-                         ent_num_classes,
-                         rel_num_classes,
-                         max_span_width=config["max_span_width"],
-                         max_re_height=config["max_re_height"],
-                         depthwise=config["depthwise"]
-                        )
+    model = DocJEREModel(
+        model,
+        tokenizer,
+        ent_num_classes,
+        rel_num_classes,
+        max_span_width=config["max_span_width"],
+        max_re_height=config["max_re_height"],
+        depthwise=config["depthwise"],
+    )
     print("Model loaded")
     model.cuda()
-    summary(model, depth=7)
+    # summary(model, depth=7)
 
     # Load datasets
     if "arpi" in config["train_path"]:
@@ -307,11 +318,30 @@ if __name__ == "__main__":
         print("Using DocRED dataset")
         dataset_name = "docred"
 
-    test_dataset = read_dataset(load_json(config["test_path"]), tokenizer, ent2id, rel2id, max_span_width=config["max_span_width"])
+    test_dataset = read_dataset(
+        load_json(config["test_path"]),
+        tokenizer,
+        ent2id,
+        rel2id,
+        max_span_width=config["max_span_width"],
+    )
 
     # Create data loaders
     test_loader = DataLoader(
-        test_dataset, batch_size=config["batch_size"], shuffle=False, collate_fn=collate_fn
+        test_dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        collate_fn=collate_fn,
     )
     device = torch.device(config["device"])
-    test(model, test_loader, device, save_path, dataset_name=dataset_name, coeff_md=config["coeff_md"], coeff_coref=config["coeff_cr"], coeff_et=config["coeff_et"], coeff_re=config["coeff_re"])
+    test(
+        model,
+        test_loader,
+        device,
+        save_path,
+        dataset_name=dataset_name,
+        coeff_md=config["coeff_md"],
+        coeff_coref=config["coeff_cr"],
+        coeff_et=config["coeff_et"],
+        coeff_re=config["coeff_re"],
+    )

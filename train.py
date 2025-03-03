@@ -39,7 +39,33 @@ def update_batch_metrics(
     return metrics
 
 
-def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, device, epochs, save_path, strategy="simultaneous", patience=2, coeff_md=1, coeff_coref=1, coeff_et=1, coeff_re=1, approx=0.01, run_name=""):
+def train(
+    model,
+    optimizer,
+    scheduler,
+    train_loader,
+    val_loader,
+    test_loader,
+    device,
+    epochs,
+    save_path,
+    pretrained_weights_path,
+    patience=2,
+    coeff_md=1,
+    coeff_coref=1,
+    coeff_et=1,
+    coeff_re=1,
+    approx=0.01,
+    run_name="",
+):
+    start_epoch = 0
+    if pretrained_weights_path:
+        print(f"Loading weights from {pretrained_weights_path}...")
+        checkpoint = torch.load(pretrained_weights_path, weights_only=True)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        start_epoch = checkpoint["epoch"]
     # Task
     if coeff_md > 0 and coeff_coref == coeff_et == coeff_re == 0:
         task = "MD"
@@ -55,23 +81,28 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
         strategy = "task_specific"
     else:
         task = "Joint"
+        strategy = "joint"
         original_coeff_md = coeff_md
         original_coeff_coref = coeff_coref
         original_coeff_et = coeff_et
         original_coeff_re = coeff_re
         print(f"Joint training with {strategy} strategy")
-        if strategy == "md_first" or strategy=="cascadian" or strategy == "md_re_cr_et":
+        if (
+            strategy == "md_first"
+            or strategy == "cascadian"
+            or strategy == "md_re_cr_et"
+        ):
             coeff_coref = coeff_et = coeff_re = 0
         elif strategy == "re_md_cr_et":
             coeff_md = coeff_coref = coeff_et = 0
         elif strategy == "re+md_cr+et":
             coeff_et = coeff_coref = 0
 
-
     progress_bar = tqdm(range(epochs), desc="Training")
     best_metric = 0
-    best_strategy_metric = {"score":0, "epoch":0}
+    best_strategy_metric = {"score": 0, "epoch": 0}
     for epoch in progress_bar:
+        epoch = start_epoch + epoch
         # Training loop
         model.train()
         train_loss = 0
@@ -156,6 +187,7 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
         joint_re_precision, joint_re_recall, joint_re_f1 = 0, 0, 0
 
         val_loss = 0
+
         with torch.no_grad():
             for batch in val_loader:
                 inputs = {
@@ -174,7 +206,7 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                     "coeff_md": coeff_md,
                     "coeff_coref": coeff_coref,
                     "coeff_et": coeff_et,
-                    "coeff_re": coeff_re
+                    "coeff_re": coeff_re,
                 }
                 (
                     loss,
@@ -308,7 +340,15 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                 )
 
                 best_metric = metric_to_monitor
-                torch.save(model.state_dict(), save_path)
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 print(f"Model saved at: {save_path}")
         description = f"Epoch {epoch + 1} | Average Training Loss: {train_loss:.4f}, Average Validation Loss: {val_loss:.4f}, | LR: {scheduler.get_last_lr()}\n\
                         ---------------------\n\
@@ -333,31 +373,74 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                         Val Joint Pair Precision: {val_joint_pair_metrics[0]:.4f}, Val Joint Pair Recall: {val_joint_pair_metrics[1]:.4f}, Val Joint Pair F1: {val_joint_pair_metrics[2]:.4f}\n\
                         Val Joint ET Precision: {val_joint_et_metrics[0]:.4f}, Val Joint ET Recall: {val_joint_et_metrics[1]:.4f}, Val Joint ET F1: {val_joint_et_metrics[2]:.4f}\n\
                         Val Joint RE Precision: {val_joint_re_metrics[0]:.4f}, Val Joint RE Recall: {val_joint_re_metrics[1]:.4f}, Val Joint RE F1: {val_joint_re_metrics[2]:.4f}\n"
-        
+
         progress_bar.set_description(description)
 
-        if strategy == "task_specific" or (coeff_md > 0 and coeff_coref > 0 and coeff_et > 0 and coeff_re > 0):
+        if strategy == "task_specific" or (
+            coeff_md > 0 and coeff_coref > 0 and coeff_et > 0 and coeff_re > 0
+        ):
             scheduler.step(metric_to_monitor)
         elif coeff_md > 0 and coeff_coref == coeff_et == coeff_re == 0:
             if val_md_metrics[3] > best_strategy_metric["score"] + approx:
                 best_strategy_metric["score"] = val_md_metrics[3]
                 best_strategy_metric["epoch"] = epoch
-                torch.save(model.state_dict(), save_path)
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 print(f"Model saved at: {save_path}")
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "cascadian":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "cascadian"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_coref = original_coeff_coref
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "md_first":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "md_first"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_coref = original_coeff_coref
                 coeff_et = original_coeff_et
                 coeff_re = original_coeff_re
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "md_re_cr_et":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "md_re_cr_et"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_re = original_coeff_re
@@ -368,7 +451,15 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                 torch.save(model.state_dict(), save_path)
                 print(f"Model saved at: {save_path}")
             elif epoch - best_strategy_metric["epoch"] > patience:
-                model.load_state_dict(torch.load(save_path))
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_et = original_coeff_et
@@ -379,11 +470,19 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                 torch.save(model.state_dict(), save_path)
                 print(f"Model saved at: {save_path}")
             elif epoch - best_strategy_metric["epoch"] > patience:
-                model.load_state_dict(torch.load(save_path))
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_re = original_coeff_re
-        
+
         # RE first
         elif coeff_re > 0 and coeff_md == coeff_coref == coeff_et == 0:
             if val_re_metrics[3] > best_strategy_metric["score"] + approx:
@@ -391,50 +490,109 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                 best_strategy_metric["epoch"] = epoch
                 torch.save(model.state_dict(), save_path)
                 print(f"Model saved at: {save_path}")
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "re_md_cr_et":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "re_md_cr_et"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_md = original_coeff_md
         elif coeff_re > 0 and coeff_md > 0 and coeff_coref == coeff_et == 0:
-            if val_md_metrics[3] + val_re_metrics[3] > best_strategy_metric["score"] + 2*approx:
+            if (
+                val_md_metrics[3] + val_re_metrics[3]
+                > best_strategy_metric["score"] + 2 * approx
+            ):
                 best_strategy_metric["score"] = val_md_metrics[3] + val_re_metrics[3]
                 best_strategy_metric["epoch"] = epoch
                 torch.save(model.state_dict(), save_path)
                 print(f"Model saved at: {save_path}")
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "re_md_cr_et":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "re_md_cr_et"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_coref = original_coeff_coref
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "re+md_cr+et":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "re+md_cr+et"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_coref = original_coeff_coref
                 coeff_et = original_coeff_et
-            elif epoch - best_strategy_metric["epoch"] > patience and strategy == "md_re_cr_et":
-                model.load_state_dict(torch.load(save_path))
+            elif (
+                epoch - best_strategy_metric["epoch"] > patience
+                and strategy == "md_re_cr_et"
+            ):
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_coref = original_coeff_coref
 
         elif coeff_re > 0 and coeff_md > 0 and coeff_coref > 0 and coeff_et == 0:
-            if val_md_metrics[3] + val_coref_metrics[3] + val_re_metrics[3] > best_strategy_metric["score"] + 3*approx:
-                best_strategy_metric["score"] = val_md_metrics[3] + val_coref_metrics[3] + val_re_metrics[3]
+            if (
+                val_md_metrics[3] + val_coref_metrics[3] + val_re_metrics[3]
+                > best_strategy_metric["score"] + 3 * approx
+            ):
+                best_strategy_metric["score"] = (
+                    val_md_metrics[3] + val_coref_metrics[3] + val_re_metrics[3]
+                )
                 best_strategy_metric["epoch"] = epoch
                 torch.save(model.state_dict(), save_path)
                 print(f"Model saved at: {save_path}")
             elif epoch - best_strategy_metric["epoch"] > patience:
-                model.load_state_dict(torch.load(save_path))
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "epoch": epoch,
+                    },
+                    save_path,
+                )
                 best_strategy_metric["score"] = 0
                 best_strategy_metric["epoch"] = epoch
                 coeff_et = original_coeff_et
 
-
-
     # Test loop
-    model.load_state_dict(torch.load(save_path))
+    checkpoint = torch.load(save_path, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
     print(f"Model loaded from: {save_path}")
     print("COREF THRESHOLD", model.coreference_resolution.threshold)
     model.eval()
@@ -474,12 +632,24 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
                 "coeff_md": coeff_md,
                 "coeff_coref": coeff_coref,
                 "coeff_et": coeff_et,
-                "coeff_re": coeff_re
+                "coeff_re": coeff_re,
             }
             md_gt.extend([label.item() for x in batch["span_labels"] for label in x])
             coref_gt.extend(batch["entity_clusters"])
-            et_gt.extend([torch.argmax(label).item() for x in batch["entity_types"] for label in x])
-            re_gt.extend([np.array(label).argmax() for x in batch["relation_labels"] for label in x])
+            et_gt.extend(
+                [
+                    torch.argmax(label).item()
+                    for x in batch["entity_types"]
+                    for label in x
+                ]
+            )
+            re_gt.extend(
+                [
+                    np.array(label).argmax()
+                    for x in batch["relation_labels"]
+                    for label in x
+                ]
+            )
             (
                 loss,
                 md_outputs,
@@ -495,14 +665,12 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
             md_precision, md_recall, md_f1, md_loss = update_batch_metrics(
                 md_precision, md_recall, md_f1, md_outputs, loss=md_loss
             )
-            coref_precision, coref_recall, coref_f1, coref_loss = (
-                update_batch_metrics(
-                    coref_precision,
-                    coref_recall,
-                    coref_f1,
-                    coref_outputs,
-                    loss=coref_loss,
-                )
+            coref_precision, coref_recall, coref_f1, coref_loss = update_batch_metrics(
+                coref_precision,
+                coref_recall,
+                coref_f1,
+                coref_outputs,
+                loss=coref_loss,
             )
             b3_precision, b3_recall, b3_f1 = update_batch_metrics(
                 b3_precision, b3_recall, b3_f1, coref_outputs, b3=True
@@ -556,7 +724,9 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
             else:
                 md_predictions.extend(list(md_outputs["predictions"].cpu().numpy()))
             coref_predictions.extend(coref_outputs["predictions"])
-            et_predictions.extend([label.item() for label in entity_typing_outputs["predictions"]])
+            et_predictions.extend(
+                [label.item() for label in entity_typing_outputs["predictions"]]
+            )
             re_predictions.extend([label.item() for label in re_outputs["predictions"]])
     test_loss /= len(test_loader)
 
@@ -583,9 +753,7 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
         item / len(test_loader) for item in test_joint_coref_metrics
     ]
     test_joint_b3_metrics = [joint_b3_precision, joint_b3_recall, joint_b3_f1]
-    test_joint_b3_metrics = [
-        item / len(test_loader) for item in test_joint_b3_metrics
-    ]
+    test_joint_b3_metrics = [item / len(test_loader) for item in test_joint_b3_metrics]
     test_joint_pair_metrics = [
         joint_pair_precision,
         joint_pair_recall,
@@ -595,13 +763,9 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
         item / len(test_loader) for item in test_joint_pair_metrics
     ]
     test_joint_et_metrics = [joint_et_precision, joint_et_recall, joint_et_f1]
-    test_joint_et_metrics = [
-        item / len(test_loader) for item in test_joint_et_metrics
-    ]
+    test_joint_et_metrics = [item / len(test_loader) for item in test_joint_et_metrics]
     test_joint_re_metrics = [joint_re_precision, joint_re_recall, joint_re_f1]
-    test_joint_re_metrics = [
-        item / len(test_loader) for item in test_joint_re_metrics
-    ]
+    test_joint_re_metrics = [item / len(test_loader) for item in test_joint_re_metrics]
 
     inference_time_per_example = inference_time / n_examples
     description = f"Test Loss: {test_loss:.4f}\n\
@@ -622,21 +786,14 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
     print(description)
     mention_detection_results = {
         "predictions": [int(pred) for pred in md_predictions],
-        "gt": [int(gt) for gt in md_gt]
+        "gt": [int(gt) for gt in md_gt],
     }
-    coreference_resolution_results = {
-        "predictions": coref_predictions,
-        "gt": coref_gt
-    }
-    entity_typing_results = {
-        "predictions": et_predictions,
-        "gt": et_gt
-    }
+    coreference_resolution_results = {"predictions": coref_predictions, "gt": coref_gt}
+    entity_typing_results = {"predictions": et_predictions, "gt": et_gt}
     relation_extraction_results = {
         "predictions": [int(pred) for pred in re_predictions],
-        "gt": [int(gt) for gt in re_gt]
+        "gt": [int(gt) for gt in re_gt],
     }
-    assert len(re_predictions) == len(re_gt)
     dir = "error_analysis"
     os.makedirs(os.path.join(dir, run_name), exist_ok=True)
     with open(os.path.join(dir, run_name, "mention_detection.json"), "w") as f:
@@ -648,10 +805,13 @@ def train(model, optimizer, scheduler, train_loader, val_loader, test_loader, de
     with open(os.path.join(dir, run_name, "relation_extraction.json"), "w") as f:
         json.dump(relation_extraction_results, f)
 
+
 if __name__ == "__main__":
-    seed = 12
+    seed = 42
     torch.manual_seed(seed)
     np.random.seed(seed)
+
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     config_path = sys.argv[1]
     config = load_json(config_path)
@@ -659,7 +819,18 @@ if __name__ == "__main__":
     print("Configurations:")
     print(config)
 
-    run_name = f"{config['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    run_name = (
+        f"{config['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    )
+
+    # Load pretrained weights if resuming
+    if config["pretrained_weights"]:
+        pretrained_weights_path = os.path.join(
+            config["log_dir"],
+            config["pretrained_weights"],
+        )
+    else:
+        pretrained_weights_path = None
 
     # Add datetime to log dir
     save_path = os.path.join(
@@ -681,17 +852,18 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(config["model_name"])
     model = AutoModel.from_pretrained(config["model_name"], config=model_config)
     print("Model loading...")
-    model = DocJEREModel(model,
-                         tokenizer,
-                         ent_num_classes,
-                         rel_num_classes,
-                         max_span_width=config["max_span_width"],
-                         max_re_height=config["max_re_height"],
-                         depthwise=config["depthwise"]
-                        )
+    model = DocJEREModel(
+        model,
+        tokenizer,
+        ent_num_classes,
+        rel_num_classes,
+        max_span_width=config["max_span_width"],
+        max_re_height=config["max_re_height"],
+        depthwise=config["depthwise"],
+    )
     print("Model loaded")
     model.cuda()
-    summary(model, depth=7)
+    # summary(model, depth=7)
 
     # Load datasets
     if "arpi" in config["train_path"]:
@@ -701,14 +873,30 @@ if __name__ == "__main__":
     else:
         print("Using DocRED dataset")
     train_dataset = read_dataset(
-        load_json(config["train_path"]), tokenizer, ent2id, rel2id, max_span_width=config["max_span_width"]
+        load_json(config["train_path"]),
+        tokenizer,
+        ent2id,
+        rel2id,
+        max_span_width=config["max_span_width"],
     )
-    val_dataset = read_dataset(load_json(config["val_path"]), tokenizer, ent2id, rel2id, max_span_width=config["max_span_width"])
-    test_dataset = read_dataset(load_json(config["test_path"]), tokenizer, ent2id, rel2id, max_span_width=config["max_span_width"])
+    val_dataset = read_dataset(
+        load_json(config["val_path"]),
+        tokenizer,
+        ent2id,
+        rel2id,
+        max_span_width=config["max_span_width"],
+    )
+    test_dataset = read_dataset(
+        load_json(config["test_path"]),
+        tokenizer,
+        ent2id,
+        rel2id,
+        max_span_width=config["max_span_width"],
+    )
 
     if config["test_one_sample_only"]:
         train_dataset = train_dataset[:1]
-        for i in range(1000):
+        for i in range(10):
             train_dataset += train_dataset[:1]
         val_dataset = train_dataset[:2]
 
@@ -726,14 +914,37 @@ if __name__ == "__main__":
         collate_fn=collate_fn,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=config["batch_size"], shuffle=False, collate_fn=collate_fn
+        test_dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        collate_fn=collate_fn,
     )
     param_groups = [
-        {"params": model.encoder.parameters(), "lr": config["encoder_learning_rate"], "amsgrad": True},
-        {"params": model.mention_detection.parameters(), "lr": config["md_learning_rate"], "amsgrad": True},
-        {"params": model.coreference_resolution.parameters(), "lr": config["cr_learning_rate"], "amsgrad": True},
-        {"params": model.entity_typing.parameters(), "lr": config["et_learning_rate"], "amsgrad": True},
-        {"params": model.rel_classifier.parameters(), "lr": config["re_learning_rate"], "amsgrad": True},
+        {
+            "params": model.encoder.parameters(),
+            "lr": config["encoder_learning_rate"],
+            "amsgrad": True,
+        },
+        {
+            "params": model.mention_detection.parameters(),
+            "lr": config["md_learning_rate"],
+            "amsgrad": True,
+        },
+        {
+            "params": model.coreference_resolution.parameters(),
+            "lr": config["cr_learning_rate"],
+            "amsgrad": True,
+        },
+        {
+            "params": model.entity_typing.parameters(),
+            "lr": config["et_learning_rate"],
+            "amsgrad": True,
+        },
+        {
+            "params": model.rel_classifier.parameters(),
+            "lr": config["re_learning_rate"],
+            "amsgrad": True,
+        },
     ]
     optimizer = torch.optim.AdamW(param_groups, lr=config["other_learning_rate"])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -741,4 +952,21 @@ if __name__ == "__main__":
     )
     device = torch.device(config["device"])
     epochs = config["epochs"]
-    train(model, optimizer, scheduler, train_loader, val_loader, test_loader, device, epochs, save_path, strategy=config["training_strategy"], patience=config["patience"], coeff_md=config["coeff_md"], coeff_coref=config["coeff_cr"], coeff_et=config["coeff_et"], coeff_re=config["coeff_re"], run_name=run_name)
+    train(
+        model,
+        optimizer,
+        scheduler,
+        train_loader,
+        val_loader,
+        test_loader,
+        device,
+        epochs,
+        save_path,
+        pretrained_weights_path,
+        patience=config["patience"],
+        coeff_md=config["coeff_md"],
+        coeff_coref=config["coeff_cr"],
+        coeff_et=config["coeff_et"],
+        coeff_re=config["coeff_re"],
+        run_name=run_name,
+    )

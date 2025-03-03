@@ -2,9 +2,8 @@ import torch
 from torch import nn
 from opt_einsum import contract
 
-from model.at_loss import ATLoss
+from model.losses import ATLoss, FocalLoss
 from model.layers.depthwise_separable_convolution import DepthwiseSeparableConv
-from model.layers.attn_unet import AttentionUNet
 from model.metrics import compute_metrics_multi_class
 
 import torch.nn.functional as F
@@ -16,10 +15,17 @@ class CoreferenceResolver(nn.Module):
 
     Args:
         hidden_size (int): The size of the hidden state.
+        block_size (int): The size of the block.
+        max_height (int): The maximum height.
 
     Attributes:
         hidden_size (int): The size of the hidden state.
-        threshold (nn.Parameter): The learnable threshold for coreference resolution.
+        block_size (int): The size of the block.
+        max_height (int): The maximum height.
+        cosine_attn (CosineMatrixAttention): The cosine matrix attention module.
+        coref_unet (AttentionUNet): The attention U-Net module.
+        coref_head_extractor (nn.Linear): The linear layer for extracting the head.
+        coref_tail_extractor (nn.Linear): The linear layer for extracting the tail.
         coref_decoder (nn.Linear): The linear layer for decoding.
 
     Methods:
@@ -35,12 +41,17 @@ class CoreferenceResolver(nn.Module):
         self.threshold = nn.Parameter(threshold, requires_grad=True)
         print("Init threshold", self.threshold)
         self.classifier = nn.Sequential(
-            nn.Linear(1, 128),
-            nn.Dropout(0.2),
+            nn.Linear(2 * self.hidden_size + 1, self.hidden_size),
+            nn.Dropout(0.4),
             nn.ReLU(),
-            nn.Linear(128, 2),
+            nn.Linear(self.hidden_size, 512),
+            nn.Dropout(0.4),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.Dropout(0.4),
+            nn.ReLU(),
+            nn.Linear(256, 2),
         )
-        
 
     def get_hrt(self, sequence_output, attention, entity_pos, hts):
         """
@@ -57,7 +68,7 @@ class CoreferenceResolver(nn.Module):
                    entity embeddings, entity attentions, and the number of entities.
 
         """
-        #offset = 1  # if self.config.transformer_type in ["bert", "roberta"] else 0
+        # offset = 1  # if self.config.transformer_type in ["bert", "roberta"] else 0
         _, h, _, c = attention.size()
         bs = len(entity_pos)
         ne = max([len(b_ents) for b_ents in entity_pos])
@@ -71,11 +82,11 @@ class CoreferenceResolver(nn.Module):
                 for entity_num, e in enumerate(entity_pos[i]):
                     (start, end) = e
                     if (start < c) and (end < c):
-                        e_emb = sequence_output[i, start : end]
-                        e_emb = e_emb.mean(0)
+                        e_emb = sequence_output[i, start:end]
+                        e_emb, _ = torch.max(e_emb, dim=0)
                         e_att = attention[i, :, start]
                     else:
-                        e_emb = torch.zeros(self.config.hidden_size).to(sequence_output)
+                        e_emb = torch.zeros(self.hidden_size).to(sequence_output)
                         e_att = torch.zeros(h, c).to(attention)
                     entity_embs.append(e_emb)
                     entity_atts.append(e_att)
@@ -100,8 +111,6 @@ class CoreferenceResolver(nn.Module):
         tss = torch.cat(tss, dim=0)
         return hss, tss, entity_es, entity_as, ne
 
-    
-
     def forward(
         self, x, attention_mask, entity_pos, hts, coreference_labels, entity_clusters
     ):
@@ -122,24 +131,34 @@ class CoreferenceResolver(nn.Module):
         B, L, D = x.size()
 
         # get hs, ts and entity_embs >> entity_rs
-        hs, ts, entity_embs, _, ne = self.get_hrt(
-            x, attention_mask, entity_pos, hts
-        )
+        hs, ts, entity_embs, _, ne = self.get_hrt(x, attention_mask, entity_pos, hts)
 
-        similarities = []
+        similarities, heads_embs, tails_embs = [], [], []
         for _b in range(len(entity_embs)):
             entity_emb = entity_embs[_b]
-            cosine_sim = F.cosine_similarity(entity_emb.unsqueeze(1), entity_emb.unsqueeze(0), dim=-1)
+            cosine_sim = F.cosine_similarity(
+                entity_emb.unsqueeze(1), entity_emb.unsqueeze(0), dim=-1
+            )
             cosine_sim = (cosine_sim - self.threshold) / (cosine_sim.std() + 1e-5)
             cosine_sim = torch.triu(cosine_sim, diagonal=1).unsqueeze(-1)
             for i in range(cosine_sim.size(1) - 1):
-                for j in range(i+1, cosine_sim.size(1)):
-                    similarities.append(cosine_sim[i, j])
-            
-        logits = self.classifier(torch.stack(similarities).to(x.device))
+                for j in range(i + 1, cosine_sim.size(1)):
+                    similarities.append(cosine_sim[i, j]),
+                    heads_embs.append(entity_emb[i])
+                    tails_embs.append(entity_emb[j])
 
-        loss_fnt = ATLoss()
+        similarities = torch.stack(similarities).to(x.device)
+        heads_embs = torch.stack(heads_embs).to(x.device).view(similarities.size(0), -1)
+        tails_embs = torch.stack(tails_embs).to(x.device).view(similarities.size(0), -1)
+        inputs = torch.cat([similarities, heads_embs, tails_embs], dim=1).view(
+            -1, 2 * self.hidden_size + 1
+        )
+        logits = self.classifier(inputs)
+        # logits = self.classifier(torch.stack(similarities).to(x.device))
+
+        loss_fnt = FocalLoss()
         labels = torch.cat(coreference_labels).to(logits.device)
+        logits = logits.view(labels.size())
 
         loss = loss_fnt(logits.float(), labels.float())
 

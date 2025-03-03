@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from opt_einsum import contract
 
-from model.at_loss import ATLoss
+from model.losses import ATLoss
 
 from model.layers.attn_unet import AttentionUNet
 from model.metrics import compute_metrics_multi_class
@@ -36,7 +36,14 @@ class UNet_Relation_Extractor(nn.Module):
         forward(self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels): Performs forward pass of the model.
     """
 
-    def __init__(self, hidden_size=768, block_size=64, num_labels=-1, max_height=5, depthwise=True):
+    def __init__(
+        self,
+        hidden_size=768,
+        block_size=64,
+        num_labels=-1,
+        max_height=5,
+        depthwise=True,
+    ):
         super(UNet_Relation_Extractor, self).__init__()
         self.hidden_size = hidden_size
         self.max_height = max_height
