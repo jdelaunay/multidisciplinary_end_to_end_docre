@@ -1,6 +1,7 @@
 *.err
 *.out
 __pycache__/
+**/__pycache__/
 saves/
 error_analysis/**/*.json
 *.sh
