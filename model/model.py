@@ -57,6 +57,7 @@ class DocJEREModel(nn.Module):
         block_size=16,
         max_re_height=42,
         depthwise=True,
+        re_loss_type="balanced_ce",
     ):
         super(DocJEREModel, self).__init__()
         self.hidden_size = hidden_size
@@ -89,6 +90,7 @@ class DocJEREModel(nn.Module):
             num_labels=n_relation_classes,
             max_height=max_re_height,
             depthwise=depthwise,
+            loss_type=re_loss_type,
         )
 
     def get_best_spans(self, span_scores, span_indices):

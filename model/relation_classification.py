@@ -43,13 +43,13 @@ class UNet_Relation_Extractor(nn.Module):
         num_labels=-1,
         max_height=5,
         depthwise=True,
-        loss_type="balanced_bce",
+        loss_type="balanced_ce",
     ):
         super(UNet_Relation_Extractor, self).__init__()
         self.hidden_size = hidden_size
         self.max_height = max_height
         self.block_size = block_size
-        if loss_type == "balanced_bce":
+        if loss_type == "balanced_ce":
             self.loss_fnt = BalancedCrossEntropyLossRE(n_labels=num_labels)
         else:
             self.loss_fnt = ATLoss()

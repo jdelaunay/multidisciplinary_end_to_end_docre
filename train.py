@@ -860,6 +860,7 @@ if __name__ == "__main__":
         max_span_width=config["max_span_width"],
         max_re_height=config["max_re_height"],
         depthwise=config["depthwise"],
+        re_loss_type=config["re_loss_type"],
     )
     print("Model loaded")
     model.cuda()
