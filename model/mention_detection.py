@@ -3,7 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 
 from model.layers.span_representation import SpanAttention
-from model.metrics import compute_metrics_md
 from model.losses import BinaryFocalLoss
 
 
@@ -13,10 +12,13 @@ class MentionDetector(nn.Module):
 
     Args:
         hidden_size (int): The size of the hidden layer. Default is 768.
+        max_width (int): The maximum width of spans. Default is 4.
 
     Attributes:
         span_rep_layer (SpanAttention): The span attention layer used for generating span representations.
         span_decoder (nn.Sequential): The sequential layer used for decoding span representations.
+        loss (BinaryFocalLoss): The loss function used for training.
+        threshold (float): The threshold for converting logits to binary predictions.
 
     """
 
@@ -34,7 +36,6 @@ class MentionDetector(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(128, 1),
         )
-        # self.loss = nn.BCEWithLogitsLoss()
         self.loss = BinaryFocalLoss(alpha=0.25, gamma=2.0)
         self.threshold = 0.5
 
@@ -47,6 +48,7 @@ class MentionDetector(nn.Module):
             span_idx (torch.Tensor): The indices of the spans.
             span_mask (torch.Tensor): The mask indicating valid spans.
             span_labels (torch.Tensor): The labels for the spans.
+            entity_pos (List[List[Tuple[int, int]]]): The entity positions.
 
         Returns:
             torch.Tensor: The logits.
@@ -54,7 +56,6 @@ class MentionDetector(nn.Module):
             float: The precision.
             float: The recall.
             float: The F1 score.
-
         """
         span_idx = span_idx * span_mask.unsqueeze(-1)
         span_representations = self.span_rep_layer(embeddings, span_idx)

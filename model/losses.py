@@ -49,6 +49,27 @@ class AutomaticWeightedLoss(nn.Module):
 
 
 class BalancedCrossEntropyLossRE(nn.Module):
+    """
+    Balanced Cross-Entropy Loss with Re-weighting.
+    This loss function computes a balanced cross-entropy loss with re-weighting
+    based on the distribution of labels in the input data. It is designed to
+    handle imbalanced datasets by adjusting the weights of the classes.
+    Args:
+        reduction (str): Specifies the reduction to apply to the output:
+                         'none' | 'mean' | 'sum'. Default: 'mean'.
+        n_labels (int): The number of labels/classes. Default: -1.
+    Methods:
+        forward(logits, labels):
+            Computes the balanced cross-entropy loss.
+            Args:
+                logits (torch.Tensor): The predicted logits with shape (N, C)
+                                       where C is the number of classes.
+                labels (torch.Tensor): The ground truth labels with shape (N, C)
+                                       where C is the number of classes.
+            Returns:
+                torch.Tensor: The computed loss.
+    """
+
     def __init__(self, reduction="mean", n_labels=-1):
         super(BalancedCrossEntropyLossRE, self).__init__()
         self.reduction = reduction

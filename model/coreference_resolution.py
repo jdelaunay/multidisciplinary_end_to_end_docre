@@ -15,22 +15,18 @@ class CoreferenceResolver(nn.Module):
 
     Args:
         hidden_size (int): The size of the hidden state.
-        block_size (int): The size of the block.
-        max_height (int): The maximum height.
 
     Attributes:
         hidden_size (int): The size of the hidden state.
-        block_size (int): The size of the block.
-        max_height (int): The maximum height.
-        cosine_attn (CosineMatrixAttention): The cosine matrix attention module.
-        coref_unet (AttentionUNet): The attention U-Net module.
-        coref_head_extractor (nn.Linear): The linear layer for extracting the head.
-        coref_tail_extractor (nn.Linear): The linear layer for extracting the tail.
-        coref_decoder (nn.Linear): The linear layer for decoding.
+        threshold (nn.Parameter): The threshold parameter for cosine similarity.
+        classifier (nn.Sequential): The classifier neural network.
 
     Methods:
         get_hrt: Get the head, tail, and entity embeddings.
-        forward: Perform forward pass through the module.
+        forward: Perform a forward pass through the module.
+        compute_metrics: Compute precision, recall, and F1 score.
+        get_coreference_clusters: Get the coreference clusters from the given inputs.
+        b3_score: Calculate the B^3 precision, recall, and F1 score.
 
     """
 
@@ -58,15 +54,18 @@ class CoreferenceResolver(nn.Module):
         Get the head, tail, and entity embeddings.
 
         Args:
-            sequence_output (torch.Tensor): The sequence output.
-            attention (torch.Tensor): The attention tensor.
-            entity_pos (list): The list of entity positions.
-            hts (list): The list of head-tail pairs.
+            sequence_output (torch.Tensor): The sequence output tensor of shape (batch_size, seq_len, hidden_size).
+            attention (torch.Tensor): The attention tensor of shape (batch_size, num_heads, seq_len, seq_len).
+            entity_pos (list): A list of lists containing the start and end positions of entities for each batch.
+            hts (list): A list of lists containing the head-tail pairs for each batch.
 
         Returns:
-            tuple: A tuple containing the head embeddings, tail embeddings,
-                   entity embeddings, entity attentions, and the number of entities.
-
+            tuple: A tuple containing:
+            - hss (torch.Tensor): The head embeddings of shape (num_pairs, hidden_size).
+            - tss (torch.Tensor): The tail embeddings of shape (num_pairs, hidden_size).
+            - entity_es (list): A list of tensors containing entity embeddings for each batch.
+            - entity_as (list): A list of tensors containing entity attentions for each batch.
+            - ne (int): The maximum number of entities in any batch.
         """
         # offset = 1  # if self.config.transformer_type in ["bert", "roberta"] else 0
         _, h, _, c = attention.size()
@@ -118,15 +117,26 @@ class CoreferenceResolver(nn.Module):
         Perform a forward pass through the module.
 
         Args:
-            x (torch.Tensor): The input tensor.
-            attention_mask (torch.Tensor): The attention mask.
-            entity_pos (list): The list of entity positions.
-            hts (list): The list of head-tail pairs.
-            coreference_labels (list): The list of coreference labels.
+            x (torch.Tensor): The input tensor of shape (batch_size, seq_len, hidden_size).
+            attention_mask (torch.Tensor): The attention mask tensor of shape (batch_size, num_heads, seq_len, seq_len).
+            entity_pos (list): A list of lists containing the start and end positions of entities for each batch.
+            hts (list): A list of lists containing the head-tail pairs for each batch.
+            coreference_labels (list): A list of tensors containing the coreference labels for each batch.
+            entity_clusters (list): A list of lists containing the ground truth entity clusters for each batch.
 
         Returns:
-            tuple: A tuple containing the loss, precision, recall, and F1 score.
-
+            tuple: A tuple containing:
+            - predicted_entity_clusters (list): The predicted coreference clusters.
+            - loss (torch.Tensor): The computed loss.
+            - precision (float): The precision score.
+            - recall (float): The recall score.
+            - f1 (float): The F1 score.
+            - b3_precision (float): The B^3 precision score.
+            - b3_recall (float): The B^3 recall score.
+            - b3_f1 (float): The B^3 F1 score.
+            - pair_precision (float): The pairwise precision score.
+            - pair_recall (float): The pairwise recall score.
+            - pair_f1 (float): The pairwise F1 score.
         """
         B, L, D = x.size()
 
@@ -154,7 +164,6 @@ class CoreferenceResolver(nn.Module):
             -1, 2 * self.hidden_size + 1
         )
         logits = self.classifier(inputs)
-        # logits = self.classifier(torch.stack(similarities).to(x.device))
 
         loss_fnt = FocalLoss()
         labels = torch.cat(coreference_labels).to(logits.device)
