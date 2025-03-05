@@ -48,6 +48,30 @@ class AutomaticWeightedLoss(nn.Module):
         return loss_sum
 
 
+class BalancedCrossEntropyLossRE(nn.Module):
+    def __init__(self, reduction="mean", n_labels=-1):
+        super(BalancedCrossEntropyLossRE, self).__init__()
+        self.reduction = reduction
+        self.n_labels = n_labels
+
+    def forward(self, logits, labels):
+        cat = torch.argmax(labels, dim=-1)
+        pos_weight = torch.tensor(
+            [(cat == i).sum().item() / cat.size(0) for i in range(self.n_labels)]
+        ).to(logits.device)
+        pos_weight = (1 - torch.square(pos_weight)) / (1 + torch.square(pos_weight))
+        logits = logits.view(-1, self.n_labels)
+        labels = torch.argmax(labels, dim=-1)
+        labels = labels.view(-1)
+        loss = F.cross_entropy(
+            logits.float(),
+            labels,
+            weight=pos_weight,
+            reduction=self.reduction,
+        )
+        return loss
+
+
 class BinaryFocalLoss(nn.Module):
     def __init__(self, alpha=0.25, gamma=2.0):
         super(BinaryFocalLoss, self).__init__()

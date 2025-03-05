@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from opt_einsum import contract
 
-from model.losses import ATLoss
+from model.losses import ATLoss, BalancedCrossEntropyLossRE
 
 from model.layers.attn_unet import AttentionUNet
 from model.metrics import compute_metrics_multi_class
@@ -43,12 +43,17 @@ class UNet_Relation_Extractor(nn.Module):
         num_labels=-1,
         max_height=5,
         depthwise=True,
+        loss_type="balanced_bce",
     ):
         super(UNet_Relation_Extractor, self).__init__()
         self.hidden_size = hidden_size
         self.max_height = max_height
         self.block_size = block_size
-        self.at_loss = ATLoss()
+        if loss_type == "balanced_bce":
+            self.loss_fnt = BalancedCrossEntropyLossRE(n_labels=num_labels)
+        else:
+            self.loss_fnt = ATLoss()
+        self.loss_type = loss_type
         input_channels = max_height
         out_channels = 256
         self.liner = nn.Linear(hidden_size, input_channels)
@@ -175,7 +180,10 @@ class UNet_Relation_Extractor(nn.Module):
         logits = self.relation_classifier(bl)
         labels = [torch.tensor(label) for label in labels]
         labels = torch.cat(labels, dim=0).to(logits)
-        loss = self.at_loss(logits.float(), labels.float())
+        if self.loss_type == "balanced_bce":
+            loss = self.loss_fnt(logits, labels)
+        else:
+            loss = self.loss_fnt(logits.float(), labels.float())
         precision, recall, f1 = compute_metrics_multi_class(logits, labels)
         predicted_labels = torch.argmax(logits, dim=1)
         return predicted_labels, loss, precision, recall, f1
