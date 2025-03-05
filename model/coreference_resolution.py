@@ -2,8 +2,7 @@ import torch
 from torch import nn
 from opt_einsum import contract
 
-from model.losses import ATLoss, FocalLoss
-from model.layers.depthwise_separable_convolution import DepthwiseSeparableConv
+from model.losses import FocalLoss
 from model.metrics import compute_metrics_multi_class
 
 import torch.nn.functional as F
