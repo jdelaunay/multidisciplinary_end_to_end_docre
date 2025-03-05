@@ -368,11 +368,9 @@ def train(
                         Train RE Loss: {train_re_metrics[0]:.4f}, Train RE Precision: {train_re_metrics[1]:.4f}, Train RE Recall: {train_re_metrics[2]:.4f}, Train RE F1: {train_re_metrics[3]:.4f}\n\
                         Val RE Loss: {val_re_metrics[0]:.4f}, Val RE Precision: {val_re_metrics[1]:.4f}, Val RE Recall: {val_re_metrics[2]:.4f}, Val RE F1: {val_re_metrics[3]:.4f}\n\
                         ======================\n\
-                        Val Joint Coref Precision: {val_joint_coref_metrics[0]:.4f}, Val Joint Coref Recall: {val_joint_coref_metrics[1]:.4f}, Val Joint Coref F1: {val_joint_coref_metrics[2]:.4f}\n\
-                        Val Joint B3 Precision: {val_joint_b3_metrics[0]:.4f}, Val Joint B3 Recall: {val_joint_b3_metrics[1]:.4f}, Val Joint B3 F1: {val_joint_b3_metrics[2]:.4f}\n\
-                        Val Joint Pair Precision: {val_joint_pair_metrics[0]:.4f}, Val Joint Pair Recall: {val_joint_pair_metrics[1]:.4f}, Val Joint Pair F1: {val_joint_pair_metrics[2]:.4f}\n\
-                        Val Joint ET Precision: {val_joint_et_metrics[0]:.4f}, Val Joint ET Recall: {val_joint_et_metrics[1]:.4f}, Val Joint ET F1: {val_joint_et_metrics[2]:.4f}\n\
-                        Val Joint RE Precision: {val_joint_re_metrics[0]:.4f}, Val Joint RE Recall: {val_joint_re_metrics[1]:.4f}, Val Joint RE F1: {val_joint_re_metrics[2]:.4f}\n"
+                        Val E2E Coref Precision: {val_joint_coref_metrics[0]:.4f}, Val E2E Coref Recall: {val_joint_coref_metrics[1]:.4f}, Val E2E Coref F1: {val_joint_coref_metrics[2]:.4f}\n\
+                        Val E2E ET Precision: {val_joint_et_metrics[0]:.4f}, Val E2E ET Recall: {val_joint_et_metrics[1]:.4f}, Val E2E ET F1: {val_joint_et_metrics[2]:.4f}\n\
+                        Val E2E RE Precision: {val_joint_re_metrics[0]:.4f}, Val E2E RE Recall: {val_joint_re_metrics[1]:.4f}, Val E2E RE F1: {val_joint_re_metrics[2]:.4f}\n"
 
         progress_bar.set_description(description)
 
@@ -743,7 +741,7 @@ def train(
     test_re_metrics = [re_loss, re_precision, re_recall, re_f1]
     test_re_metrics = [item / len(test_loader) for item in test_re_metrics]
 
-    # Joint tasks metrics
+    # E2E tasks metrics
     test_joint_coref_metrics = [
         joint_coref_precision,
         joint_coref_recall,
@@ -778,11 +776,9 @@ def train(
                     Test ET Loss: {test_et_metrics[0]:.4f}, Test ET Precision: {test_et_metrics[1]:.4f}, Test ET Recall: {test_et_metrics[2]:.4f}, Test ET F1: {test_et_metrics[3]:.4f}\n\
                     Test RE Loss: {test_re_metrics[0]:.4f}, Test RE Precision: {test_re_metrics[1]:.4f}, Test RE Recall: {test_re_metrics[2]:.4f}, Test RE F1: {test_re_metrics[3]:.4f}\n\
                     ======================\n\
-                    Test Joint Coref Precision: {test_joint_coref_metrics[0]:.4f}, Test Joint Coref Recall: {test_joint_coref_metrics[1]:.4f}, Test Joint Coref F1: {test_joint_coref_metrics[2]:.4f}\n\
-                    Test Joint B3 Precision: {test_joint_b3_metrics[0]:.4f}, Test Joint B3 Recall: {test_joint_b3_metrics[1]:.4f}, Test Joint B3 F1: {test_joint_b3_metrics[2]:.4f}\n\
-                    Test Joint Pair Precision: {test_joint_pair_metrics[0]:.4f}, Test Joint Pair Recall: {test_joint_pair_metrics[1]:.4f}, Test Joint Pair F1: {test_joint_pair_metrics[2]:.4f}\n\
-                    Test Joint ET Precision: {test_joint_et_metrics[0]:.4f}, Test Joint ET Recall: {test_joint_et_metrics[1]:.4f}, Test Joint ET F1: {test_joint_et_metrics[2]:.4f}\n\
-                    Test Joint RE Precision: {test_joint_re_metrics[0]:.4f}, Test Joint RE Recall: {test_joint_re_metrics[1]:.4f}, Test Joint RE F1: {test_joint_re_metrics[2]:.4f}\n"
+                    Test E2E Coref Precision: {test_joint_coref_metrics[0]:.4f}, Test E2E Coref Recall: {test_joint_coref_metrics[1]:.4f}, Test E2E Coref F1: {test_joint_coref_metrics[2]:.4f}\n\
+                    Test E2E ET Precision: {test_joint_et_metrics[0]:.4f}, Test E2E ET Recall: {test_joint_et_metrics[1]:.4f}, Test E2E ET F1: {test_joint_et_metrics[2]:.4f}\n\
+                    Test E2E RE Precision: {test_joint_re_metrics[0]:.4f}, Test E2E RE Recall: {test_joint_re_metrics[1]:.4f}, Test E2E RE F1: {test_joint_re_metrics[2]:.4f}\n"
     print(description)
     mention_detection_results = {
         "predictions": [int(pred) for pred in md_predictions],
@@ -867,10 +863,8 @@ if __name__ == "__main__":
     # summary(model, depth=7)
 
     # Load datasets
-    if "arpi" in config["train_path"]:
-        print("Using ARPI dataset")
-    elif "dwie" in config["train_path"]:
-        print("Using DWIE dataset")
+    if "coastred" in config["train_path"]:
+        print("Using CoastRED dataset")
     else:
         print("Using DocRED dataset")
     train_dataset = read_dataset(
