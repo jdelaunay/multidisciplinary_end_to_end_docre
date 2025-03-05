@@ -43,7 +43,7 @@ def test(
     model,
     test_loader,
     device,
-    save_path,
+    pretrained_weights_path,
     dataset_name="docred",
     coeff_md=1,
     coeff_coref=1,
@@ -52,8 +52,10 @@ def test(
 ):
 
     # Test loop
-    model.load_state_dict(torch.load(save_path, weights_only=True))
-    print(f"Model loaded from: {save_path}")
+    print(f"Loading weights from {pretrained_weights_path}...")
+    checkpoint = torch.load(pretrained_weights_path, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    print(f"Model loaded from: {pretrained_weights_path}")
     print("COREF THRESHOLD", model.coreference_resolution.threshold)
     model.eval()
     md_loss, md_precision, md_recall, md_f1 = 1e-30, 0, 0, 0
@@ -275,9 +277,9 @@ if __name__ == "__main__":
     config = load_json(config_path)
 
     # Add datetime to log dir
-    save_path = os.path.join(
+    pretrained_weights_path = os.path.join(
         config["log_dir"],
-        f"{config['run_name']}.pt",
+        f"{config['pretrained_weights_path']}",
     )
     os.makedirs(config["log_dir"], exist_ok=True)
 
@@ -338,7 +340,7 @@ if __name__ == "__main__":
         model,
         test_loader,
         device,
-        save_path,
+        pretrained_weights_path,
         dataset_name=dataset_name,
         coeff_md=config["coeff_md"],
         coeff_coref=config["coeff_cr"],
