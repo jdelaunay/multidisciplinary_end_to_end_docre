@@ -29,11 +29,8 @@ def plot_confusion_matrix(
     classes = classes
     if normalize:
         cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
-        # print("Normalized confusion matrix")
-    # else:
-    # print("Confusion matrix, without normalization")
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 10))  # Increase the size of the plot
     im = ax.imshow(cm, interpolation="nearest", cmap=cmap)
     ax.figure.colorbar(im, ax=ax)
     # We want to show all ticks...
@@ -49,7 +46,7 @@ def plot_confusion_matrix(
     )
 
     # Rotate the tick labels and set their alignment.
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    plt.setp(ax.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor")
 
     # Loop over data dimensions and create text annotations.
     fmt = ".2f" if normalize else "d"
@@ -252,12 +249,17 @@ if __name__ == "__main__":
         )
         os.makedirs("confusion_matrix", exist_ok=True)
 
-        plt.savefig(os.path.join("confusion_matrix", f"{"".join(sys.argv[1].split('/')[1:]).split(".")[0]}_confusion_matrix.png"))
+        plt.savefig(
+            os.path.join(
+                "confusion_matrix",
+                f"{"".join(sys.argv[1].split('/')[1:]).split(".")[0]}_confusion_matrix.png",
+            )
+        )
         # plt.show()
         plt.close()
 
     # Recognition of INTERACTION spans
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-base")
+    tokenizer = AutoTokenizer.from_pretrained("FacebookAI/roberta-base")
     test_data = load_json(os.path.join(sys.argv[2], "test.json"))
     types = load_json(os.path.join(sys.argv[2], "ent2id.json")).keys()
     labels = load_json(os.path.join(sys.argv[1], "mention_detection.json"))
@@ -265,20 +267,37 @@ if __name__ == "__main__":
     type_specific_gt_span_labels_dict, total_relation_labels = get_specific_type_labels(
         test_data, types, tokenizer
     )
-    for type, type_specific_gt_span_labels_batches in type_specific_gt_span_labels_dict.items():
+    for (
+        type,
+        type_specific_gt_span_labels_batches,
+    ) in type_specific_gt_span_labels_dict.items():
         type_specific_gt_span_labels_batches = [
-            type_specific_gt_span_labels_batches[i:i + 4] for i in range(0, len(type_specific_gt_span_labels_batches), 4)
+            type_specific_gt_span_labels_batches[i : i + 4]
+            for i in range(0, len(type_specific_gt_span_labels_batches), 4)
         ]
         if len(type_specific_gt_span_labels_batches[-1]) < 4:
-            type_specific_gt_span_labels_batches[-1].extend([[]] * (4 - len(type_specific_gt_span_labels_batches[-1])))
-        type_specific_gt_span_labels_batches = [pad_labels(labels) for labels in type_specific_gt_span_labels_batches]
-        type_specific_gt_span_labels = [label for batches in type_specific_gt_span_labels_batches for batch in batches for label in batch]
+            type_specific_gt_span_labels_batches[-1].extend(
+                [[]] * (4 - len(type_specific_gt_span_labels_batches[-1]))
+            )
+        type_specific_gt_span_labels_batches = [
+            pad_labels(labels) for labels in type_specific_gt_span_labels_batches
+        ]
+        type_specific_gt_span_labels = [
+            label
+            for batches in type_specific_gt_span_labels_batches
+            for batch in batches
+            for label in batch
+        ]
         print(len(type_specific_gt_span_labels), len(y_pred))
         assert len(type_specific_gt_span_labels) == len(y_pred)
-        type_span_acc = compute_type_specific_span_accuracy(type_specific_gt_span_labels, y_pred)
-        print(f"Type: {type}, Span Accuracy: {type_span_acc}")
+        type_span_acc = compute_type_specific_span_accuracy(
+            type_specific_gt_span_labels, y_pred
+        )
+        print(f"Type: {type}, Span Accuracy: {round(type_span_acc*100,2)}")
     count_relation_labels = {
-        label: total_relation_labels.count(label) / len(total_relation_labels) * 100
+        label: round(
+            total_relation_labels.count(label) / len(total_relation_labels) * 100, 2
+        )
         for label in set(total_relation_labels)
     }
     print(count_relation_labels)
