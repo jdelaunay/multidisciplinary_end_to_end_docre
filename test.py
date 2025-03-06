@@ -279,7 +279,7 @@ if __name__ == "__main__":
     # Add datetime to log dir
     pretrained_weights_path = os.path.join(
         config["log_dir"],
-        f"{config['pretrained_weights_path']}",
+        f"{config['pretrained_weights']}",
     )
     os.makedirs(config["log_dir"], exist_ok=True)
 
@@ -310,15 +310,18 @@ if __name__ == "__main__":
     # summary(model, depth=7)
 
     # Load datasets
-    if "arpi" in config["train_path"]:
-        print("Using ARPI dataset")
+    if "coastred" in config["train_path"]:
+        print("Using CoastRED dataset")
         dataset_name = "coastred"
-    elif "dwie" in config["train_path"]:
-        print("Using DWIE dataset")
-        dataset_name = "dwie"
-    else:
+    elif "redocred" in config["train_path"]:
+        print("Using ReDocRED dataset")
+        dataset_name = "redocred"
+    elif "docred" in config["train_path"]:
         print("Using DocRED dataset")
         dataset_name = "docred"
+    else:
+        print("Using other dataset")
+        dataset_name = "other"
 
     test_dataset = read_dataset(
         load_json(config["test_path"]),
