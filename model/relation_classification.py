@@ -2,10 +2,9 @@ import torch
 import torch.nn as nn
 from opt_einsum import contract
 
-from model.at_loss import ATLoss
+from model.losses import ATLoss
 
 from model.layers.attn_unet import AttentionUNet
-from model.metrics import compute_metrics_multi_class
 
 
 class UNet_Relation_Extractor(nn.Module):
@@ -36,12 +35,22 @@ class UNet_Relation_Extractor(nn.Module):
         forward(self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels): Performs forward pass of the model.
     """
 
-    def __init__(self, hidden_size=768, block_size=64, num_labels=-1, max_height=5, depthwise=True):
+    def __init__(
+        self,
+        hidden_size=768,
+        block_size=64,
+        num_labels=-1,
+        max_height=5,
+        depthwise=True,
+        loss_type="",
+    ):
         super(UNet_Relation_Extractor, self).__init__()
         self.hidden_size = hidden_size
         self.max_height = max_height
         self.block_size = block_size
-        self.at_loss = ATLoss()
+        self.num_labels = num_labels
+        self.loss_fnt = ATLoss()
+        self.loss_type = loss_type
         input_channels = max_height
         out_channels = 256
         self.liner = nn.Linear(hidden_size, input_channels)
@@ -51,7 +60,7 @@ class UNet_Relation_Extractor(nn.Module):
         self.head_extractor = nn.Linear(1 * hidden_size + out_channels, hidden_size)
         self.tail_extractor = nn.Linear(1 * hidden_size + out_channels, hidden_size)
 
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.6)
 
         self.relation_classifier = nn.Linear(hidden_size * block_size, num_labels)
 
@@ -168,7 +177,11 @@ class UNet_Relation_Extractor(nn.Module):
         logits = self.relation_classifier(bl)
         labels = [torch.tensor(label) for label in labels]
         labels = torch.cat(labels, dim=0).to(logits)
-        loss = self.at_loss(logits.float(), labels.float())
-        precision, recall, f1 = compute_metrics_multi_class(logits, labels)
-        predicted_labels = torch.argmax(logits, dim=1)
-        return predicted_labels, loss, precision, recall, f1
+        loss = self.loss_fnt(logits.float(), labels.float())
+        predicted_labels = self.loss_fnt.get_label(logits, num_labels=self.num_labels)
+
+        scores_topk = self.loss_fnt.get_score(logits, self.num_labels)
+        scores = scores_topk[0]
+        topks = scores_topk[1]
+
+        return predicted_labels, scores, topks, loss

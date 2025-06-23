@@ -2,8 +2,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from model.metrics import compute_metrics_multi_class
-
 
 class EntityClassifier(nn.Module):
     """
@@ -56,5 +54,4 @@ class EntityClassifier(nn.Module):
             reduction="mean",
         )
         predicted_entity_types = torch.argmax(entity_logits, dim=1)
-        precision, recall, f1 = compute_metrics_multi_class(entity_logits, entity_types)
-        return predicted_entity_types, loss, precision, recall, f1
+        return predicted_entity_types, loss

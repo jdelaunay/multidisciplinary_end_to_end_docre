@@ -18,6 +18,7 @@ def load_json(file_path):
 
 
 def collate_fn(batch):
+    titles = [f["title"] for f in batch]
     max_len = max([len(f["input_ids"]) for f in batch])
     input_ids = [f["input_ids"] + [0] * (max_len - len(f["input_ids"])) for f in batch]
     input_mask = [
@@ -61,5 +62,32 @@ def collate_fn(batch):
         "entity_types": entity_types,
         "entity_centric_hts": entity_centric_hts,
         "relation_labels": relation_labels,
+        "titles": titles,
     }
     return output
+
+
+def get_batch_inputs(
+    batch,
+    coefficients,
+    device,
+):
+    return {
+        "input_ids": batch["input_ids"].to(device),
+        "attention_mask": batch["attention_mask"].to(device),
+        "span_idx": batch["span_idx"].to(device),
+        "span_mask": batch["span_mask"].to(device),
+        "span_labels": batch["span_labels"].to(device),
+        "coreference_labels": batch["coreference_labels"],
+        "entity_clusters": batch["entity_clusters"],
+        "hts": batch["hts"],
+        "entity_pos": batch["entity_pos"],
+        "entity_types": batch["entity_types"],
+        "entity_centric_hts": batch["entity_centric_hts"],
+        "relation_labels": batch["relation_labels"],
+        "titles": batch["titles"],
+        "coeff_md": coefficients[0],
+        "coeff_cr": coefficients[1],
+        "coeff_et": coefficients[2],
+        "coeff_re": coefficients[3],
+    }

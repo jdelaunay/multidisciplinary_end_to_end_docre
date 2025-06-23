@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from model.layers.span_representation import SpanAttention
-from model.metrics import compute_metrics_md
+from model.losses import BinaryFocalLoss
 
 
 class MentionDetector(nn.Module):
@@ -21,7 +21,9 @@ class MentionDetector(nn.Module):
 
     def __init__(self, hidden_size=768, max_width=4):
         super(MentionDetector, self).__init__()
-        self.span_rep_layer = SpanAttention(hidden_size=hidden_size, max_width=max_width)
+        self.span_rep_layer = SpanAttention(
+            hidden_size=hidden_size, max_width=max_width
+        )
         self.span_decoder = nn.Sequential(
             nn.LayerNorm(hidden_size),
             nn.Linear(hidden_size, 512),
@@ -31,7 +33,8 @@ class MentionDetector(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(128, 1),
         )
-        self.loss = nn.BCEWithLogitsLoss()
+        # self.loss = nn.BCEWithLogitsLoss()
+        self.loss = BinaryFocalLoss(alpha=0.25, gamma=2.0)
         self.threshold = 0.5
 
     def forward(self, embeddings, span_idx, span_mask, span_labels, entity_pos):
@@ -56,21 +59,22 @@ class MentionDetector(nn.Module):
         span_representations = self.span_rep_layer(embeddings, span_idx)
         logits = self.span_decoder(span_representations)
         logits = logits.squeeze(-1)
-        
+
         logits = logits.view(span_labels.size())
-        
+
         predicted_labels = (torch.sigmoid(logits) >= 0.5).long()
         predicted_entity_pos = self.get_predicted_entity_pos(predicted_labels, span_idx)
-        precision, recall, f1 = self.compute_metrics(predicted_entity_pos, entity_pos)
         if self.threshold != 0.5:
             joint_predicted_labels = (torch.sigmoid(logits) >= self.threshold).long()
-            predicted_entity_pos = self.get_predicted_entity_pos(joint_predicted_labels, span_idx)
+            predicted_entity_pos = self.get_predicted_entity_pos(
+                joint_predicted_labels, span_idx
+            )
         logits = logits.view(-1)
         span_labels = span_labels.view(-1)
         loss = self.loss(logits.float(), span_labels.float())
         predicted_labels = predicted_labels.view(-1)
-        return predicted_labels, predicted_entity_pos, loss, precision, recall, f1
-    
+        return predicted_labels, predicted_entity_pos, loss
+
     def get_predicted_entity_pos(self, predicted_labels, span_idx):
         """
         Get the predicted entity positions based on the given logits and span indices.

@@ -3,9 +3,7 @@ import numpy as np
 import torch
 
 
-def read_dataset(
-    data, tokenizer, classes_to_id, rel_to_id, max_span_width=5
-):
+def read_dataset(data, tokenizer, classes_to_id, rel2id, max_span_width=5):
     features = []
     print("Loading dataset...")
     for sample in data:
@@ -30,7 +28,7 @@ def read_dataset(
 
         # Preprocess entities
         entity_pos = []
-        
+
         for mention in mentions:
             sent_id = mention["sent_id"]
             pos = mention["pos"]
@@ -60,8 +58,6 @@ def read_dataset(
             if ent[:2] not in cleaned_entity_pos_only_pos:
                 cleaned_entity_pos.append(ent)
         entity_pos = sorted(cleaned_entity_pos)
-
-
 
         # Preprocess coreferences
         corefs = {}
@@ -101,15 +97,40 @@ def read_dataset(
             assert i in ent_map.values()
 
         ## Preprocess relations
+        # training triples with positive examples (entity pairs with labels)
+        train_triple = {}
+
+        if "labels" in sample:
+            for label in sample["labels"]:
+                if (label["h"] < effective_ent_count) and (
+                    label["t"] < effective_ent_count
+                ):
+                    evidence = label["evidence"]
+                    r = int(rel2id[label["r"]])
+
+                    # update training triples
+                    if (label["h"], label["t"]) not in train_triple:
+                        train_triple[(label["h"], label["t"])] = [
+                            {"relation": r, "evidence": evidence}
+                        ]
+                    else:
+                        train_triple[(label["h"], label["t"])].append(
+                            {"relation": r, "evidence": evidence}
+                        )
 
         ### Sample positive relations
-        entity_centric_hts = []
-        relation_labels = []
-        for label in rels:
-            if entity_pos_grouped[label["h"]] and entity_pos_grouped[label["t"]]:
-                entity_centric_hts.append((ent_map[label["h"]], ent_map[label["t"]]))
-                relation_labels.append(get_ent_class(label["r"], rel_to_id))
-        
+        entity_centric_hts, relation_labels, sent_labels = [], [], []
+
+        for h, t in train_triple.keys():  # for every entity pair with gold relation
+            relation = [0] * len(rel2id)
+
+            for mention in train_triple[
+                h, t
+            ]:  # for each relation mention with head h and tail t
+                relation[mention["relation"]] = 1
+
+            relation_labels.append(relation)
+            entity_centric_hts.append((h, t))
 
         ### Sample negative relations
         for i in range(effective_ent_count):
@@ -117,10 +138,13 @@ def read_dataset(
                 if i != j:
                     if (i, j) not in entity_centric_hts:
                         entity_centric_hts.append((i, j))
-                        relation_labels.append([1] + [0] * (len(rel_to_id) - 1))
+                        relation_labels.append([1] + [0] * (len(rel2id) - 1))
 
         sorted_entity_centric_hts = sorted(entity_centric_hts)
-        sorted_relation_labels = [relation_labels[entity_centric_hts.index(ht)] for ht in sorted_entity_centric_hts]
+        sorted_relation_labels = [
+            relation_labels[entity_centric_hts.index(ht)]
+            for ht in sorted_entity_centric_hts
+        ]
         entity_centric_hts = sorted_entity_centric_hts
         relation_labels = sorted_relation_labels
         if entity_centric_hts:
@@ -183,6 +207,7 @@ def read_dataset(
                 "entity_types": entity_types,
                 "entity_centric_hts": entity_centric_hts,
                 "relation_labels": relation_labels,
+                "title": sample["title"],
             }
             features.append(feature)
     print("Dataset loaded.")
