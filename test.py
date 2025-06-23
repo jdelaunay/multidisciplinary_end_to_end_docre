@@ -212,10 +212,12 @@ def test(
     mention_detection_results = {
         "predictions": [int(pred) for pred in md_predictions],
         "gt": [int(gt) for gt in md_gt],
+        "gt": [int(gt) for gt in md_gt],
     }
     coreference_resolution_results = {"predictions": cr_predictions, "gt": coref_gt}
     relation_extraction_results = {
         "predictions": [int(pred) for pred in re_predictions],
+        "gt": [int(gt) for gt in re_gt],
         "gt": [int(gt) for gt in re_gt],
     }
 
@@ -229,6 +231,7 @@ def test(
         json.dump(relation_extraction_results, f)
 
 
+
 if __name__ == "__main__":
     SEED = 42
     torch.manual_seed(SEED)
@@ -239,7 +242,9 @@ if __name__ == "__main__":
 
     # Add datetime to log dir
     pretrained_weights_path = os.path.join(
+    pretrained_weights_path = os.path.join(
         config["log_dir"],
+        f"{config['pretrained_weights']}",
         f"{config['pretrained_weights']}",
     )
     os.makedirs(config["log_dir"], exist_ok=True)
@@ -268,11 +273,23 @@ if __name__ == "__main__":
         max_re_height=config["max_re_height"],
         depthwise=config["depthwise"],
     )
+    model = DocJEREModel(
+        model,
+        tokenizer,
+        ent_num_classes,
+        rel_num_classes,
+        max_span_width=config["max_span_width"],
+        max_re_height=config["max_re_height"],
+        depthwise=config["depthwise"],
+    )
     print("Model loaded")
     model.cuda()
     # summary(model, depth=7)
+    # summary(model, depth=7)
 
     # Load datasets
+    if "coastred" in config["train_path"]:
+        print("Using CoastRED dataset")
     if "coastred" in config["train_path"]:
         print("Using CoastRED dataset")
         dataset_name = "coastred"
@@ -280,8 +297,15 @@ if __name__ == "__main__":
         print("Using ReDocRED dataset")
         dataset_name = "redocred"
     elif "docred" in config["train_path"]:
+    elif "redocred" in config["train_path"]:
+        print("Using ReDocRED dataset")
+        dataset_name = "redocred"
+    elif "docred" in config["train_path"]:
         print("Using DocRED dataset")
         dataset_name = "docred"
+    else:
+        print("Using other dataset")
+        dataset_name = "other"
     else:
         print("Using other dataset")
         dataset_name = "other"
@@ -293,9 +317,20 @@ if __name__ == "__main__":
         rel2id,
         max_span_width=config["max_span_width"],
     )
+    test_dataset = read_dataset(
+        load_json(config["test_path"]),
+        tokenizer,
+        ent2id,
+        rel2id,
+        max_span_width=config["max_span_width"],
+    )
 
     # Create data loaders
     test_loader = DataLoader(
+        test_dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        collate_fn=collate_fn,
         test_dataset,
         batch_size=config["batch_size"],
         shuffle=False,

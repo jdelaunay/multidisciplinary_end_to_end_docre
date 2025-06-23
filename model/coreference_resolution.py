@@ -29,7 +29,10 @@ class CoreferenceResolver(nn.Module):
 
     Methods:
         get_hrt: Get the head, tail, and entity embeddings.
-        forward: Perform forward pass through the module.
+        forward: Perform a forward pass through the module.
+        compute_metrics: Compute precision, recall, and F1 score.
+        get_coreference_clusters: Get the coreference clusters from the given inputs.
+        b3_score: Calculate the B^3 precision, recall, and F1 score.
 
     """
 
@@ -48,7 +51,16 @@ class CoreferenceResolver(nn.Module):
             nn.ReLU(),
             nn.Linear(512, 256),
             nn.Dropout(0.4),
+            nn.Linear(2 * self.hidden_size + 1, self.hidden_size),
+            nn.Dropout(0.4),
             nn.ReLU(),
+            nn.Linear(self.hidden_size, 512),
+            nn.Dropout(0.4),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.Dropout(0.4),
+            nn.ReLU(),
+            nn.Linear(256, 2),
             nn.Linear(256, 2),
         )
 
@@ -57,16 +69,20 @@ class CoreferenceResolver(nn.Module):
         Get the head, tail, and entity embeddings.
 
         Args:
-            sequence_output (torch.Tensor): The sequence output.
-            attention (torch.Tensor): The attention tensor.
-            entity_pos (list): The list of entity positions.
-            hts (list): The list of head-tail pairs.
+            sequence_output (torch.Tensor): The sequence output tensor of shape (batch_size, seq_len, hidden_size).
+            attention (torch.Tensor): The attention tensor of shape (batch_size, num_heads, seq_len, seq_len).
+            entity_pos (list): A list of lists containing the start and end positions of entities for each batch.
+            hts (list): A list of lists containing the head-tail pairs for each batch.
 
         Returns:
-            tuple: A tuple containing the head embeddings, tail embeddings,
-                   entity embeddings, entity attentions, and the number of entities.
-
+            tuple: A tuple containing:
+            - hss (torch.Tensor): The head embeddings of shape (num_pairs, hidden_size).
+            - tss (torch.Tensor): The tail embeddings of shape (num_pairs, hidden_size).
+            - entity_es (list): A list of tensors containing entity embeddings for each batch.
+            - entity_as (list): A list of tensors containing entity attentions for each batch.
+            - ne (int): The maximum number of entities in any batch.
         """
+        # offset = 1  # if self.config.transformer_type in ["bert", "roberta"] else 0
         # offset = 1  # if self.config.transformer_type in ["bert", "roberta"] else 0
         _, h, _, c = attention.size()
         bs = len(entity_pos)
@@ -83,8 +99,11 @@ class CoreferenceResolver(nn.Module):
                     if (start < c) and (end < c):
                         e_emb = sequence_output[i, start:end]
                         e_emb, _ = torch.max(e_emb, dim=0)
+                        e_emb = sequence_output[i, start:end]
+                        e_emb, _ = torch.max(e_emb, dim=0)
                         e_att = attention[i, :, start]
                     else:
+                        e_emb = torch.zeros(self.hidden_size).to(sequence_output)
                         e_emb = torch.zeros(self.hidden_size).to(sequence_output)
                         e_att = torch.zeros(h, c).to(attention)
                     entity_embs.append(e_emb)
@@ -115,24 +134,40 @@ class CoreferenceResolver(nn.Module):
         Perform a forward pass through the module.
 
         Args:
-            x (torch.Tensor): The input tensor.
-            attention_mask (torch.Tensor): The attention mask.
-            entity_pos (list): The list of entity positions.
-            hts (list): The list of head-tail pairs.
-            coreference_labels (list): The list of coreference labels.
+            x (torch.Tensor): The input tensor of shape (batch_size, seq_len, hidden_size).
+            attention_mask (torch.Tensor): The attention mask tensor of shape (batch_size, num_heads, seq_len, seq_len).
+            entity_pos (list): A list of lists containing the start and end positions of entities for each batch.
+            hts (list): A list of lists containing the head-tail pairs for each batch.
+            coreference_labels (list): A list of tensors containing the coreference labels for each batch.
+            entity_clusters (list): A list of lists containing the ground truth entity clusters for each batch.
 
         Returns:
-            tuple: A tuple containing the loss, precision, recall, and F1 score.
-
+            tuple: A tuple containing:
+            - predicted_entity_clusters (list): The predicted coreference clusters.
+            - loss (torch.Tensor): The computed loss.
+            - precision (float): The precision score.
+            - recall (float): The recall score.
+            - f1 (float): The F1 score.
+            - b3_precision (float): The B^3 precision score.
+            - b3_recall (float): The B^3 recall score.
+            - b3_f1 (float): The B^3 F1 score.
+            - pair_precision (float): The pairwise precision score.
+            - pair_recall (float): The pairwise recall score.
+            - pair_f1 (float): The pairwise F1 score.
         """
         B, L, D = x.size()
 
         # get hs, ts and entity_embs >> entity_rs
         hs, ts, entity_embs, _, ne = self.get_hrt(x, attention_mask, entity_pos, hts)
+        hs, ts, entity_embs, _, ne = self.get_hrt(x, attention_mask, entity_pos, hts)
 
+        similarities, heads_embs, tails_embs = [], [], []
         similarities, heads_embs, tails_embs = [], [], []
         for _b in range(len(entity_embs)):
             entity_emb = entity_embs[_b]
+            cosine_sim = F.cosine_similarity(
+                entity_emb.unsqueeze(1), entity_emb.unsqueeze(0), dim=-1
+            )
             cosine_sim = F.cosine_similarity(
                 entity_emb.unsqueeze(1), entity_emb.unsqueeze(0), dim=-1
             )
@@ -155,6 +190,7 @@ class CoreferenceResolver(nn.Module):
 
         loss_fnt = FocalLoss()
         labels = torch.cat(coreference_labels).to(logits.device)
+        logits = logits.view(labels.size())
         logits = logits.view(labels.size())
 
         loss = loss_fnt(logits.float(), labels.float())
