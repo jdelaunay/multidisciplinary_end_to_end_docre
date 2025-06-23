@@ -79,7 +79,6 @@ def train(
     progress_bar = tqdm(range(start_epoch, epochs), desc="Training")
     best_strategy_metric = {"loss": np.inf, "score": 0, "epoch": 0}
     for epoch in progress_bar:
-        epoch = start_epoch + epoch
         # Training loop
         model.train()
         train_loss = 0
@@ -111,7 +110,6 @@ def train(
         e2e_titles_et_preds, e2e_et_clusters = [], []
         e2e_titles_re_preds, e2e_entity_centric_hts = [], []
         val_loss = 0
-
         with torch.no_grad():
             for batch in val_loader:
                 inputs = get_batch_inputs(
@@ -292,8 +290,6 @@ def train(
     # Test loop
     checkpoint = torch.load(save_path, weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])
-    checkpoint = torch.load(save_path, weights_only=True)
-    model.load_state_dict(checkpoint["model_state_dict"])
     print(f"Model loaded from: {save_path}")
     print("COREF THRESHOLD", model.coreference_resolution.threshold)
     model.eval()
@@ -439,7 +435,6 @@ def train(
     print(description)
 
 
-
 if __name__ == "__main__":
     torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -453,18 +448,6 @@ if __name__ == "__main__":
     print("Configurations:")
     print(config)
 
-    run_name = (
-        f"{config['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-    )
-
-    # Load pretrained weights if resuming
-    if config["pretrained_weights"]:
-        pretrained_weights_path = os.path.join(
-            config["log_dir"],
-            config["pretrained_weights"],
-        )
-    else:
-        pretrained_weights_path = None
     run_name = (
         f"{config['run_name']}_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     )
@@ -512,34 +495,16 @@ if __name__ == "__main__":
     print("Model loaded")
     model.cuda()
     # summary(model, depth=7)
-    # summary(model, depth=7)
 
     # Load datasets
-    if "coastred" in config["train_path"]:
-        print("Using CoastRED dataset")
+    if "arpi" in config["train_path"]:
+        print("Using ARPI dataset")
+    elif "dwie" in config["train_path"]:
+        print("Using DWIE dataset")
     else:
         print("Using DocRED dataset")
     train_dataset = read_dataset(
         load_json(config["train_path"]),
-        tokenizer,
-        ent2id,
-        rel2id,
-        max_span_width=config["max_span_width"],
-        load_json(config["train_path"]),
-        tokenizer,
-        ent2id,
-        rel2id,
-        max_span_width=config["max_span_width"],
-    )
-    val_dataset = read_dataset(
-        load_json(config["val_path"]),
-        tokenizer,
-        ent2id,
-        rel2id,
-        max_span_width=config["max_span_width"],
-    )
-    test_dataset = read_dataset(
-        load_json(config["test_path"]),
         tokenizer,
         ent2id,
         rel2id,
@@ -562,7 +527,7 @@ if __name__ == "__main__":
 
     if config["test_one_sample_only"]:
         train_dataset = train_dataset[:1]
-        for i in range(10):
+        for i in range(1000):
             train_dataset += train_dataset[:1]
         val_dataset = train_dataset[:2]
         test_dataset = train_dataset[:2]
@@ -581,10 +546,6 @@ if __name__ == "__main__":
         collate_fn=collate_fn,
     )
     test_loader = DataLoader(
-        test_dataset,
-        batch_size=config["batch_size"],
-        shuffle=False,
-        collate_fn=collate_fn,
         test_dataset,
         batch_size=config["batch_size"],
         shuffle=False,

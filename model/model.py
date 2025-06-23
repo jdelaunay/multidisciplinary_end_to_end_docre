@@ -16,7 +16,6 @@ class DocJEREModel(nn.Module):
     This model performs multiple tasks including Mention Detection, Coreference Resolution,
     Entity Typing, and Relation Classification. It uses a transformer-based encoder and
     various task-specific modules to achieve these tasks.
-
     Attributes:
         hidden_size (int): The size of the hidden layers.
         tokenizer (Tokenizer): The tokenizer used for encoding input text.
@@ -24,13 +23,11 @@ class DocJEREModel(nn.Module):
         word_mlp (nn.Linear): A linear layer for word-level feature transformation.
         max_span_width (int): The maximum width of spans for mention detection.
         max_re_width (int): The maximum height for relation extraction.
-        awl (AutomaticWeightedLoss): The module for automatic weighted loss calculation.
         mention_detection (MentionDetector): The module for mention detection.
         threshold (torch.nn.Parameter): A threshold parameter for mention detection.
         coreference_resolution (CoreferenceResolver): The module for coreference resolution.
         entity_typing (EntityClassifier): The module for entity typing.
         rel_classifier (UNet_Relation_Extractor): The module for relation classification.
-
     Methods:
         get_best_spans(span_scores, span_indices):
             Get the best spans based on span scores.
@@ -46,20 +43,7 @@ class DocJEREModel(nn.Module):
         coreference_resolution_joint(x, attention_mask, e2e_entity_pos, e2e_hts, e2e_coreference_labels,
                                      e2e_entity_clusters, mean_proportions):
         get_batch_entity_embeddings(b_embeddings, b_attention, b_entity_clusters):
-            Calculate the embeddings and attention weights for a batch of entity clusters.
         get_entity_embeddings(embeddings, attention, entity_clusters):
-            Get pooled entity embeddings and attention scores for each entity.
-        get_joint_entity_types(joint_entity_clusters, entity_clusters, entity_types):
-            Get the joint entity types in a batch.
-        get_joint_relation_labels(joint_entity_clusters, entity_clusters, entity_centric_hts, relation_labels):
-            Get the joint relation labels in a batch.
-        entity_typing_joint(joint_entity_embeddings, joint_entity_types, proportion):
-            Calculate the joint precision, recall, and F1-score for entity typing.
-        relation_extraction_joint(joint_embeddings, joint_entity_embeddings, joint_entity_attentions,
-                                  joint_entity_centric_hts, joint_relation_labels, proportion):
-            Calculate the joint precision, recall, and F1-score for relation extraction.
-        filter_spans(span_representations, span_scores):
-            Filter spans based on confidence scores.
     """
 
     def __init__(
@@ -73,7 +57,6 @@ class DocJEREModel(nn.Module):
         block_size=16,
         max_re_height=42,
         depthwise=True,
-        re_loss_type="balanced_ce",
     ):
         super(DocJEREModel, self).__init__()
         self.hidden_size = hidden_size
@@ -106,7 +89,6 @@ class DocJEREModel(nn.Module):
             num_labels=n_relation_classes,
             max_height=max_re_height,
             depthwise=depthwise,
-            loss_type=re_loss_type,
         )
 
     def get_best_spans(self, span_scores, span_indices):

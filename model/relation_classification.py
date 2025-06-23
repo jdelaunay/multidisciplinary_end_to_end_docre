@@ -16,25 +16,21 @@ class UNet_Relation_Extractor(nn.Module):
         block_size (int): The size of the block.
         num_labels (int): The number of labels.
         max_height (int): The maximum height.
-        depthwise (bool): Whether to use depthwise convolutions in the UNet.
-        loss_type (str): The type of loss function to use.
 
     Attributes:
         hidden_size (int): The size of the hidden layer.
         max_height (int): The maximum height.
         block_size (int): The size of the block.
-        loss_fnt (nn.Module): The loss function.
-        loss_type (str): The type of loss function.
-        liner (nn.Linear): The linear layer for feature mapping.
+        at_loss (ATLoss): The ATLoss object.
+        liner (nn.Linear): The linear layer.
         relation_unet (AttentionUNet): The AttentionUNet object.
         head_extractor (nn.Linear): The linear layer for head extraction.
         tail_extractor (nn.Linear): The linear layer for tail extraction.
-        dropout (nn.Dropout): The dropout layer.
         relation_classifier (nn.Linear): The linear layer for relation classification.
 
     Methods:
         get_ht(self, rel_enco, hts): Returns the ht values.
-        get_htss(self, sequence_outputs, entity_embeddings, entity_centric_hts): Returns the hss and tss values.
+        get_htss(self, entity_embeddings, entity_attentions, entity_centric_hts): Returns the hss and tss values.
         get_channel_map(self, sequence_output, entity_as): Returns the channel map.
         forward(self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels): Performs forward pass of the model.
     """
@@ -89,13 +85,15 @@ class UNet_Relation_Extractor(nn.Module):
 
     def get_htss(self, sequence_outputs, entity_embeddings, entity_centric_hts):
         """
-        Extracts and returns the head and tail entity embeddings (hss and tss) based on entity-centric head-tail indices.
+        Returns the hss and tss values.
 
-            sequence_outputs (Tensor): The output tensor from the sequence model.
-            entity_embeddings (Tensor): The tensor containing embeddings for entities.
-            entity_centric_hts (List[List[Tuple[int, int]]]): A list of lists, where each sublist contains tuples of head-tail indices for entities.
+        Args:
+            entity_embeddings (Tensor): The entity embeddings tensor.
+            entity_attentions (List[Tensor]): The list of entity attentions tensors.
+            entity_centric_hts (List[List[Tuple[int, int]]]): The list of entity-centric ht indices.
 
-            Tuple[Tensor, Tensor]: Two tensors containing the head (hss) and tail (tss) entity embeddings respectively.
+        Returns:
+            Tuple[Tensor, Tensor]: The hss and tss values.
         """
         hss, tss = [], []
         for i in range(len(entity_centric_hts)):
@@ -148,17 +146,17 @@ class UNet_Relation_Extractor(nn.Module):
         self, x, entity_embeddings, entity_attentions, entity_centric_hts, labels
     ):
         """
-        Performs forward pass of the model.
+        Performs forward pass of the module.
 
         Args:
             x (Tensor): The input tensor.
             entity_embeddings (Tensor): The entity embeddings tensor.
             entity_attentions (List[Tensor]): The list of entity attentions tensors.
             entity_centric_hts (List[List[Tuple[int, int]]]): The list of entity-centric ht indices.
-            labels (List[Tensor]): The list of label tensors.
+            labels (List[int]): The list of labels.
 
         Returns:
-            Tuple[Tensor, Tensor, float, float, float]: The predicted labels, loss, precision, recall, and f1 score.
+            Tuple[Tensor, Tensor, Tensor, Tensor]: The loss, precision, recall, and f1 score.
         """
         hs, ts = self.get_htss(x, entity_embeddings, entity_centric_hts)
 
